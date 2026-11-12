@@ -31,14 +31,21 @@ jobs:
         shell: pwsh
         working-directory: apps/jarvis-desktop
         run: npm version "0.3.${{ github.run_number }}" --no-git-tag-version --allow-same-version
-      - name: Installateur et publication
+      - name: Installateur
         working-directory: apps/jarvis-desktop
-        run: node build.mjs && npx electron-builder --win nsis --x64 --publish always
+        run: node build.mjs && npx electron-builder --win nsis --x64 --publish never
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
       - uses: actions/upload-artifact@v4
         with:
           name: Jarvis-installation
           path: apps/jarvis-desktop/release/*.exe
           retention-days: 30
+      - name: Publication (onglet Releases, lue par les mises à jour automatiques)
+        shell: pwsh
+        working-directory: apps/jarvis-desktop/release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "0.3.${{ github.run_number }}"
+          gh release create "v$version" (Get-ChildItem -File | Where-Object { $_.Name -match '\.(exe|blockmap|yml)$' -and $_.Name -notmatch 'uninstaller|builder-debug' } | ForEach-Object { $_.FullName }) --target "${{ github.sha }}" --title "Jarvis $version" --notes "Installateur Windows de Jarvis $version. Les Jarvis déjà installés se mettent à jour tout seuls."
