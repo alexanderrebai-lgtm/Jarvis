@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -32,6 +33,7 @@ export const VAULT_MARKER = "@coffre";
 export class Vault {
   private readonly file: string;
   private cache: Record<string, string> | undefined;
+  private unreadable = false;
 
   constructor(dir: string, private readonly cipher: Cipher) {
     mkdirSync(dir, { recursive: true });
@@ -48,7 +50,8 @@ export class Vault {
     try {
       this.cache = JSON.parse(this.cipher.decrypt(readFileSync(this.file))) as Record<string, string>;
     } catch {
-      // Coffre illisible (autre session Windows, fichier abîmé) : on repart à vide sans l'écraser.
+      // Coffre illisible (autre session Windows, ancien format, fichier abîmé) : on repart à vide sans l'écraser.
+      this.unreadable = true;
       return {};
     }
     return this.cache;
@@ -56,6 +59,9 @@ export class Vault {
 
   private write(values: Record<string, string>): void {
     if (!this.available) throw new Error("Le chiffrement de Windows n'est pas disponible.");
+    // Un coffre illisible n'est jamais écrasé : il est mis de côté.
+    if (this.unreadable && existsSync(this.file)) renameSync(this.file, `${this.file}.${Date.now()}.illisible`);
+    this.unreadable = false;
     const tmp = `${this.file}.tmp`;
     writeFileSync(tmp, this.cipher.encrypt(JSON.stringify(values)));
     renameSync(tmp, this.file);
@@ -90,6 +96,12 @@ export class Vault {
   keys(): string[] {
     return Object.keys(this.read());
   }
+
+  /** Oublie ce qui est en mémoire (après une conversion du fichier). */
+  reset(): void {
+    this.cache = undefined;
+    this.unreadable = false;
+  }
 }
 
 /**
@@ -119,4 +131,47 @@ export function migrateEnvSecrets(envFile: string, vault: Vault, env: NodeJS.Pro
     }
   }
   return moved;
+}
+
+/** En-tête des coffres chiffrés directement par Windows (DPAPI). */
+export const DPAPI_HEADER = "DPAPI1:";
+
+/**
+ * Chiffrement Windows (DPAPI, lié à ta session) par PowerShell. Contrairement à
+ * safeStorage d'Electron, il est disponible dès le lancement, avant que la
+ * fenêtre de Jarvis soit prête : les mots de passe sont lus à temps.
+ * Les données passent par l'entrée standard, jamais sur la ligne de commande.
+ */
+export function dpapiCipher(run: (script: string, input: string) => string = runPowerShellSync): Cipher {
+  const script = (method: "Protect" | "Unprotect") =>
+    `Add-Type -AssemblyName System.Security; $d = [Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); [Convert]::ToBase64String([Security.Cryptography.ProtectedData]::${method}($d, $null, 'CurrentUser'))`;
+  return {
+    available: () => process.platform === "win32",
+    encrypt: (text) => Buffer.from(`${DPAPI_HEADER}${run(script("Protect"), Buffer.from(text, "utf8").toString("base64")).trim()}`),
+    decrypt: (data) => {
+      const raw = data.toString("utf8");
+      if (!raw.startsWith(DPAPI_HEADER)) throw new Error("ancien format du coffre");
+      return Buffer.from(run(script("Unprotect"), raw.slice(DPAPI_HEADER.length)).trim(), "base64").toString("utf8");
+    },
+  };
+}
+
+function runPowerShellSync(script: string, input: string): string {
+  return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], { input, encoding: "utf8", windowsHide: true, timeout: 20_000 });
+}
+
+/** Le coffre a-t-il été écrit dans l'ancien format (safeStorage) ? */
+export function isLegacyVault(dir: string): boolean {
+  const file = path.join(dir, "coffre.bin");
+  return existsSync(file) && !readFileSync(file).subarray(0, DPAPI_HEADER.length).equals(Buffer.from(DPAPI_HEADER));
+}
+
+/** Convertit un ancien coffre (safeStorage) vers le nouveau format. Renvoie le nombre de secrets repris. */
+export function migrateLegacyVault(dir: string, legacyDecrypt: (data: Buffer) => string, target: Vault): number {
+  const file = path.join(dir, "coffre.bin");
+  const values = JSON.parse(legacyDecrypt(readFileSync(file))) as Record<string, string>;
+  renameSync(file, `${file}.ancien`);
+  target.reset();
+  for (const [key, value] of Object.entries(values)) target.set(key, value);
+  return Object.keys(values).length;
 }

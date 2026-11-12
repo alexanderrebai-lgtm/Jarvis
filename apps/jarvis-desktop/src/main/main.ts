@@ -63,7 +63,7 @@ import { parseCameras, rtspUrl, SecurityService, type SurveillanceMode } from ".
 import { elmScript, findElmScript, serialMonitorScript } from "./serial.js";
 import { BackgroundTasks } from "./tasks.js";
 import { findTelegramChat, googleSignIn, SettingsStore } from "./settings.js";
-import { migrateEnvSecrets, Vault } from "./vault.js";
+import { dpapiCipher, isLegacyVault, migrateEnvSecrets, migrateLegacyVault, Vault } from "./vault.js";
 import { Veille } from "./veille.js";
 import { Ears, isInterruption, pickSpeechModel, SentenceSplitter, Voice, DEFAULT_VOICE } from "./voice.js";
 import { ENROLL_PHRASES, VoiceLock, wavlmEmbedder } from "./voiceprint.js";
@@ -99,18 +99,24 @@ if (!existsSync(envFile)) copyFileSync(path.join(assets, "jarvis.env.example"), 
 process.loadEnvFile(envFile);
 process.env.DATA_DIR ||= path.join(userDir, "data");
 
-// Coffre-fort : les mots de passe tapés dans jarvis.env sont chiffrés par Windows, puis remis en mémoire.
-const vault = new Vault(userDir, {
-  available: () => {
-    try {
-      return safeStorage.isEncryptionAvailable();
-    } catch {
-      return false;
-    }
-  },
-  encrypt: (text) => safeStorage.encryptString(text),
-  decrypt: (data) => safeStorage.decryptString(data),
-});
+// Coffre-fort : les mots de passe tapés dans jarvis.env sont chiffrés par Windows (DPAPI), puis remis en mémoire.
+// Sous Windows, le chiffrement direct est lisible dès le lancement ; ailleurs (développement), safeStorage.
+const vault = new Vault(
+  userDir,
+  process.platform === "win32"
+    ? dpapiCipher()
+    : {
+        available: () => {
+          try {
+            return safeStorage.isEncryptionAvailable();
+          } catch {
+            return false;
+          }
+        },
+        encrypt: (text) => safeStorage.encryptString(text),
+        decrypt: (data) => safeStorage.decryptString(data),
+      },
+);
 let movedSecrets: string[] = [];
 try {
   movedSecrets = migrateEnvSecrets(envFile, vault);
@@ -1092,7 +1098,7 @@ async function runDiagnostic() {
     { id: "voix", groupe: "Voix", titre: "Voix de Jarvis", run: () => ({ etat: voice.mode === "en ligne" ? "ok" : "attention", detail: voice.mode === "en ligne" ? "Voix neuronale en ligne." : `Voix de secours Windows (${voice.lastError ?? "voix en ligne injoignable"}).` }) },
     { id: "empreinte", groupe: "Voix", titre: "Verrou vocal", run: () => (voiceLock.enrolled ? { etat: "ok", detail: `Ta voix est enregistrée (seuil ${voiceLock.threshold}).` } : { etat: "attention", detail: "Pas d'empreinte : n'importe quelle voix peut commander Jarvis.", conseil: "Dis « Jarvis, apprends ma voix » et répète les cinq phrases.", action: { libelle: "Apprendre ma voix", commande: "apprends ma voix" } }) },
     { id: "micro", groupe: "Sens", titre: "Micro et caméras", run: () => ({ etat: senses.micro ? "ok" : "erreur", detail: `Micro ${senses.micro ? "actif" : "indisponible"} · ${senses.cameras} webcam(s) · gestes ${senses.gestes ? "actifs" : "inactifs"} · détecteur de personne ${senses.detecteur ? "prêt" : "non chargé"}`, ...(senses.micro ? {} : { conseil: "Paramètres Windows → Confidentialité → Microphone : autorise les applications de bureau." }) }) },
-    { id: "google", groupe: "Services", titre: "Gmail et Agenda", run: async () => (agenda ? (await agenda.list(new Date(), new Date(Date.now() + 3_600_000)), { etat: "ok" as const, detail: "Connecté." }) : { etat: "absent" as const, detail: "Non configuré.", conseil: "Page Réglages → Gmail et Google Agenda.", action: { libelle: "Relier Google", reglages: "google" } }) },
+    { id: "google", groupe: "Services", titre: "Gmail et Agenda", run: async () => (agenda ? await agenda.list(new Date(), new Date(Date.now() + 3_600_000)).then(() => ({ etat: "ok" as const, detail: "Connecté." }), (error: unknown) => ({ etat: "erreur" as const, detail: `Google refuse : ${error instanceof Error ? error.message : String(error)}`, conseil: "Reconnecte-toi depuis les Réglages (en mode test, Google coupe l'accès après 7 jours : publie l'application dans la console Google).", action: { libelle: "Reconnecter Google", reglages: "google" } })) : { etat: "absent" as const, detail: "Non configuré.", conseil: "Page Réglages → Gmail et Google Agenda.", action: { libelle: "Relier Google", reglages: "google" } }) },
     { id: "tapo", groupe: "Maison", titre: "Ampoules et prises Tapo", run: async () => {
       if (!tapo) return { etat: "absent", detail: "Non configuré.", action: { libelle: "Relier Tapo", reglages: "tapo" } };
       const states = await tapo.states();
@@ -1720,9 +1726,9 @@ async function runSettingAction(id: string): Promise<{ ok: boolean; message: str
       }
       case "google": {
         if (!env("GOOGLE_CLIENT_ID") || !env("GOOGLE_CLIENT_SECRET")) return { ok: false, message: "Colle d'abord l'ID client et le code secret, puis enregistre." };
-        const token = await googleSignIn({ clientId: env("GOOGLE_CLIENT_ID")!, clientSecret: env("GOOGLE_CLIENT_SECRET")!, scopes: GOOGLE_SCOPES, open: (url) => void shell.openExternal(url) });
-        settings.save({ GOOGLE_REFRESH_TOKEN: token });
-        return { ok: true, message: "Google est relié. Redémarre Jarvis pour qu'il lise tes mails et ton agenda.", redemarrage: true };
+        const signed = await googleSignIn({ clientId: env("GOOGLE_CLIENT_ID")!, clientSecret: env("GOOGLE_CLIENT_SECRET")!, scopes: GOOGLE_SCOPES, open: (url) => void shell.openExternal(url) });
+        settings.save({ GOOGLE_REFRESH_TOKEN: signed.refreshToken });
+        return { ok: true, message: `Google est relié${signed.email ? ` (${signed.email})` : ""}. Redémarre Jarvis (bouton en haut) pour qu'il lise tes mails et ton agenda.`, redemarrage: true };
       }
       case "spotify":
         return { ok: true, message: await spotifyHelpers.connect() };
@@ -1802,6 +1808,20 @@ ipcMain.on("jarvis:redemarrer", () => {
 
 void app.whenReady().then(async () => {
   app.setAppUserModelId("fr.alex.jarvis");
+
+  // Ancien coffre (versions 0.3.3 et avant, illisible au lancement) : converti une fois, puis Jarvis redémarre.
+  if (process.platform === "win32" && isLegacyVault(userDir)) {
+    try {
+      const count = migrateLegacyVault(userDir, (data) => safeStorage.decryptString(data), vault);
+      console.log(`[coffre] ${count} secret(s) convertis`);
+      quitting = true;
+      app.relaunch();
+      app.exit(0);
+      return;
+    } catch (error) {
+      reportCrash(new Error(`Coffre-fort : conversion impossible (${error instanceof Error ? error.message : error}). Retape tes mots de passe dans la page Réglages.`));
+    }
+  }
 
   // apercu://code/… et apercu://rd/… : fichiers du projet affiché ; apercu://securite/… : images des caméras. Jamais en dehors.
   protocol.handle("apercu", (request) => {

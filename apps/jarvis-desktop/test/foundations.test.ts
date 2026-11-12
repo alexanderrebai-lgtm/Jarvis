@@ -196,3 +196,20 @@ describe("réflexes", () => {
     expect(parseIntent("allume la lumière et explique-moi la relativité générale en détail s'il te plaît")).toBeUndefined();
   });
 });
+
+describe("coffre-fort Windows (DPAPI)", () => {
+  it("chiffre lisiblement dès le lancement et convertit l'ancien format", async () => {
+    const { dpapiCipher, isLegacyVault, migrateLegacyVault, DPAPI_HEADER } = await import("../src/main/vault.js");
+    // Faux DPAPI : renvoie l'entrée telle quelle (base64 → base64).
+    const cipher = { ...dpapiCipher((_script, input) => input), available: () => true };
+    const dir = tmp("dpapi");
+    writeFileSync(path.join(dir, "coffre.bin"), fakeCipher.encrypt(JSON.stringify({ GOOGLE_REFRESH_TOKEN: "1//abc" })));
+    expect(isLegacyVault(dir)).toBe(true);
+    const vault = new Vault(dir, cipher);
+    expect(vault.get("GOOGLE_REFRESH_TOKEN")).toBeUndefined();
+    expect(migrateLegacyVault(dir, (d) => fakeCipher.decrypt(d), vault)).toBe(1);
+    expect(isLegacyVault(dir)).toBe(false);
+    expect(readFileSync(path.join(dir, "coffre.bin"), "utf8").startsWith(DPAPI_HEADER)).toBe(true);
+    expect(new Vault(dir, cipher).get("GOOGLE_REFRESH_TOKEN")).toBe("1//abc");
+  });
+});

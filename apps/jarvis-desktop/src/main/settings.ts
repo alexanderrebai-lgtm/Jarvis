@@ -255,7 +255,7 @@ export class SettingsStore {
 export const GOOGLE_REDIRECT_PORT = 8899;
 
 /** Connexion Google pour une « application de bureau » : page Google dans le navigateur, retour sur 127.0.0.1. */
-export async function googleSignIn(options: { clientId: string; clientSecret: string; scopes: string[]; open: (url: string) => void; fetchFn?: typeof fetch; timeoutMs?: number }): Promise<string> {
+export async function googleSignIn(options: { clientId: string; clientSecret: string; scopes: string[]; open: (url: string) => void; fetchFn?: typeof fetch; timeoutMs?: number }): Promise<{ refreshToken: string; email?: string }> {
   const redirect = `http://127.0.0.1:${GOOGLE_REDIRECT_PORT}/google`;
   const verifier = randomBytes(48).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
@@ -286,9 +286,17 @@ export async function googleSignIn(options: { clientId: string; clientSecret: st
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ code, client_id: options.clientId, client_secret: options.clientSecret, redirect_uri: redirect, grant_type: "authorization_code", code_verifier: verifier }),
   });
-  const data = (await res.json()) as { refresh_token?: string; error?: string; error_description?: string };
+  const data = (await res.json()) as { refresh_token?: string; access_token?: string; error?: string; error_description?: string };
   if (!data.refresh_token) throw new Error(`Google n'a pas donné d'autorisation (${data.error_description ?? data.error ?? res.status}).`);
-  return data.refresh_token;
+  // Vérification immédiate : on lit l'adresse du compte Gmail relié.
+  let email: string | undefined;
+  if (data.access_token) {
+    const profile = await (options.fetchFn ?? fetch)("https://gmail.googleapis.com/gmail/v1/users/me/profile", { headers: { authorization: `Bearer ${data.access_token}` } });
+    const body = (await profile.json().catch(() => ({}))) as { emailAddress?: string; error?: { message?: string } };
+    if (!profile.ok) throw new Error(`Connexion faite, mais Gmail refuse l'accès : ${body.error?.message ?? profile.status}. Vérifie que « Gmail API » est activée dans la console Google.`);
+    email = body.emailAddress;
+  }
+  return { refreshToken: data.refresh_token, ...(email ? { email } : {}) };
 }
 
 /** Identifiant de la dernière conversation avec le bot Telegram. */
