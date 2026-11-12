@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Concept 3 — Arc spatial</title>
+<style>
+@font-face { font-family: "Grotesk"; src: url("space-grotesk.woff2"); font-weight: 300 700; }
+@font-face { font-family: "Inter"; src: url("inter.woff2"); font-weight: 100 900; }
+:root { --text: #eaf6ff; --muted: rgba(220, 240, 255, 0.55); --line: rgba(190, 230, 255, 0.22); --ice: #9fe8ff; }
+* { box-sizing: border-box; margin: 0; }
+body { height: 100vh; overflow: hidden; color: var(--text); font-family: "Inter", sans-serif;
+  background: radial-gradient(ellipse at 50% 40%, #12283a 0%, #060b12 55%, #020306 100%); perspective: 1400px; }
+/* Sol en perspective : on est « dans » l'interface. */
+.floor { position: absolute; left: -50%; right: -50%; bottom: -30%; height: 70%; transform: rotateX(78deg);
+  background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 80px 80px;
+  -webkit-mask: radial-gradient(ellipse at 50% 0%, #000 10%, transparent 65%); mask: radial-gradient(ellipse at 50% 0%, #000 10%, transparent 65%); opacity: 0.5; }
+.stage { position: absolute; inset: 0; transform-style: preserve-3d; }
+/* Le noyau : des anneaux qui tournent dans l'espace. */
+.core { position: absolute; left: 50%; top: 40%; width: 320px; height: 320px; margin: -160px; transform-style: preserve-3d; }
+.core i { position: absolute; inset: 0; border-radius: 50%; border: 1.5px solid rgba(159, 232, 255, 0.6); box-shadow: 0 0 30px rgba(159, 232, 255, 0.25), inset 0 0 30px rgba(159, 232, 255, 0.15); }
+.core i:nth-child(1) { transform: rotateX(70deg); animation: spin 14s linear infinite; }
+.core i:nth-child(2) { transform: rotateY(70deg); animation: spin2 18s linear infinite; inset: 22px; }
+.core i:nth-child(3) { transform: rotateX(20deg) rotateY(40deg); inset: 50px; border-style: dashed; animation: spin 26s linear infinite reverse; }
+.core b { position: absolute; inset: 110px; border-radius: 50%; background: radial-gradient(circle, #fff, rgba(159, 232, 255, 0.8) 30%, rgba(159, 232, 255, 0) 70%); filter: blur(2px); }
+@keyframes spin { to { transform: rotateX(70deg) rotateZ(360deg); } }
+@keyframes spin2 { to { transform: rotateY(70deg) rotateZ(-360deg); } }
+/* Les panneaux flottent en arc autour d'Alex, inclinés vers lui. */
+.panel { position: absolute; width: 300px; padding: 18px 20px; border-radius: 16px; background: linear-gradient(160deg, rgba(159, 232, 255, 0.12), rgba(159, 232, 255, 0.03));
+  border: 1px solid var(--line); backdrop-filter: blur(10px); box-shadow: 0 0 40px rgba(159, 232, 255, 0.08); font-size: 14px; line-height: 1.5; }
+.panel h4 { font: 500 11px "Grotesk"; letter-spacing: 0.25em; text-transform: uppercase; color: var(--ice); margin-bottom: 10px; }
+.panel .r { display: flex; justify-content: space-between; padding: 5px 0; border-top: 1px solid rgba(190, 230, 255, 0.08); }
+.panel .r:first-of-type { border: 0; }
+.panel small { color: var(--muted); }
+.l1 { left: 4%; top: 12%; transform: rotateY(32deg) translateZ(-80px); }
+.l2 { left: 5%; top: 48%; transform: rotateY(28deg) translateZ(-40px); }
+.r1 { right: 4%; top: 12%; transform: rotateY(-32deg) translateZ(-80px); }
+.r2 { right: 5%; top: 48%; transform: rotateY(-28deg) translateZ(-40px); }
+.say { position: absolute; left: 50%; top: 76%; transform: translateX(-50%); width: 640px; text-align: center; }
+.say p { font: 300 23px/1.4 "Grotesk"; }
+.say small { display: block; margin-top: 14px; color: var(--muted); font-size: 13px; letter-spacing: 0.15em; text-transform: uppercase; }
+.top { position: absolute; top: 28px; left: 0; right: 0; text-align: center; font: 400 13px "Grotesk"; letter-spacing: 0.6em; color: var(--muted); }
+.top b { color: var(--text); font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="floor"></div>
+<div class="top"><b>JARVIS</b> · 21:04</div>
+<div class="stage">
+  <div class="core"><i></i><i></i><i></i><b></b></div>
+  <div class="panel l1"><h4>Conversation</h4>« Montre-moi la pièce. »<br><small>Je l'affiche à côté de toi, Alex.</small></div>
+  <div class="panel l2"><h4>Projet · Support volant</h4><div class="r"><span>Version</span><span>v3</span></div><div class="r"><span>Matière</span><span>PETG</span></div><div class="r"><span>Masse</span><span>148 g</span></div><div class="r"><span>Impression</span><span>4 h 20</span></div></div>
+  <div class="panel r1"><h4>Maison</h4><div class="r"><span>Salon</span><span>30 %</span></div><div class="r"><span>Simulateur</span><span>allumé</span></div><div class="r"><span>Chambre</span><span>éteinte</span></div></div>
+  <div class="panel r2"><h4>Aujourd'hui</h4><div class="r"><span>Brief équipe</span><span>09:00</span></div><div class="r"><span>Entretien Karim</span><span>11:30</span></div><div class="r"><span>Course LMU</span><span>21:00</span></div></div>
+  <div class="say"><p>La v3 du support tient 3,2 fois la charge de ton volant. Je la passe en PETG et j'ajoute deux nervures : il te faudra 4 h 20 d'impression.</p><small>Jarvis parle · ✋ pour l'arrêter</small></div>
+</div>
+</body>
+</html>

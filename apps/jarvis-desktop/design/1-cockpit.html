@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Concept 1 — Cockpit</title>
+<style>
+@font-face { font-family: "JB"; src: url("jetbrains-mono.woff2"); font-weight: 100 800; }
+@font-face { font-family: "Inter"; src: url("inter.woff2"); font-weight: 100 900; }
+:root { --bg: #0a0a0b; --panel: #121214; --line: #232327; --text: #f2f2f0; --muted: #7c7c82; --red: #ff2d2d; --orange: #ff7a1a; --green: #2dff8a; --purple: #b46bff; }
+* { box-sizing: border-box; margin: 0; }
+body { background: var(--bg); color: var(--text); font-family: "Inter", sans-serif; height: 100vh; overflow: hidden;
+  background-image: repeating-linear-gradient(45deg, rgba(255,255,255,0.012) 0 2px, transparent 2px 6px); }
+.app { display: grid; grid-template-columns: 300px 1fr 320px; grid-template-rows: 84px 1fr 150px; gap: 1px; height: 100%; background: var(--line); }
+.cell { background: var(--bg); padding: 18px 22px; position: relative; }
+.label { font: 600 10px "JB"; letter-spacing: 0.22em; color: var(--muted); text-transform: uppercase; display: flex; justify-content: space-between; }
+.label b { color: var(--orange); font-weight: 600; }
+/* Barre LED façon volant : le niveau de la voix */
+.top { grid-column: 1 / -1; display: grid; grid-template-columns: 300px 1fr 320px; align-items: center; padding: 0; }
+.top > div { padding: 0 22px; }
+.brand { font: 700 18px "JB"; letter-spacing: 0.3em; }
+.brand span { color: var(--red); }
+.leds { display: flex; gap: 6px; justify-content: center; }
+.leds i { width: 26px; height: 12px; border-radius: 3px; background: #1d1d20; }
+.leds i.g { background: var(--green); box-shadow: 0 0 12px var(--green); }
+.leds i.o { background: var(--orange); box-shadow: 0 0 12px var(--orange); }
+.leds i.r { background: var(--red); box-shadow: 0 0 12px var(--red); }
+.leds i.p { background: var(--purple); box-shadow: 0 0 12px var(--purple); }
+.clock { text-align: right; font: 300 30px "JB"; }
+.clock small { font-size: 12px; color: var(--muted); margin-left: 10px; }
+/* Centre : le « mode » comme sur un écran de volant */
+.center { display: flex; flex-direction: column; justify-content: space-between; }
+.mode { display: flex; gap: 8px; }
+.mode span { font: 600 11px "JB"; padding: 6px 12px; border: 1px solid var(--line); color: var(--muted); }
+.mode span.on { color: #000; background: var(--orange); border-color: var(--orange); }
+.big { font: 200 112px/0.9 "JB"; letter-spacing: -0.04em; white-space: nowrap; }
+.big small { display: block; font-size: 13px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); margin-top: 14px; }
+.answer { font-size: 26px; line-height: 1.35; font-weight: 300; max-width: 820px; }
+.answer em { font-style: normal; color: var(--orange); }
+.wave { height: 60px; display: flex; align-items: center; gap: 3px; }
+.wave i { flex: 1; background: var(--orange); border-radius: 1px; opacity: 0.9; }
+.prompt { display: flex; align-items: center; gap: 14px; border-top: 1px solid var(--line); padding-top: 16px; font: 14px "JB"; color: var(--muted); }
+.prompt .ptt { padding: 8px 14px; background: var(--red); color: #fff; font-weight: 700; letter-spacing: 0.1em; }
+/* Colonnes */
+.log { display: flex; flex-direction: column; gap: 16px; margin-top: 18px; font-size: 14px; line-height: 1.45; }
+.log .alex { color: var(--muted); }
+.log .alex::before { content: "ALEX › "; font: 600 10px "JB"; color: var(--orange); }
+.log .jarvis::before { content: "JRV › "; font: 600 10px "JB"; color: var(--red); }
+.row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.row:last-child { border: 0; }
+.row .v { font: 500 14px "JB"; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 10px; background: #2a2a2e; }
+.dot.on { background: var(--orange); box-shadow: 0 0 8px var(--orange); }
+.delta { color: var(--green); }
+.delta.neg { color: var(--red); }
+.stack { display: flex; flex-direction: column; gap: 22px; }
+.bottom { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, 1fr) 1.4fr; gap: 1px; background: var(--line); padding: 0; }
+.bottom .cell { display: flex; flex-direction: column; justify-content: space-between; }
+.metric { font: 300 40px "JB"; }
+.metric small { font-size: 14px; color: var(--muted); }
+.bar { height: 4px; background: #1d1d20; }
+.bar i { display: block; height: 100%; background: var(--orange); }
+.cams { display: flex; gap: 8px; height: 100%; }
+.cams div { flex: 1; background: linear-gradient(135deg, #1a1a1d, #0f0f11); border: 1px solid var(--line); position: relative; }
+.cams div::after { content: attr(data-n); position: absolute; left: 8px; bottom: 6px; font: 600 9px "JB"; color: var(--muted); letter-spacing: 0.15em; }
+.cams div::before { content: ""; position: absolute; top: 8px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="cell top">
+    <div class="brand">JRV<span>/</span>S</div>
+    <div class="leds" id="leds"></div>
+    <div class="clock">21:04<small>JEU 12 NOV</small></div>
+  </div>
+
+  <div class="cell">
+    <div class="label">Radio <b>● REC</b></div>
+    <div class="log">
+      <div class="alex">On attaque le relais de nuit, fais-moi un point.</div>
+      <div class="jarvis">P4 en Hypercar, 2,8 s derrière la Ferrari. Il te reste 11 tours d'énergie, l'arrêt est prévu au tour 46.</div>
+      <div class="alex">Les pneus ?</div>
+      <div class="jarvis">Avant gauche à 92 °C, c'est le plus chaud. Lève un peu plus tôt au Tertre Rouge.</div>
+    </div>
+  </div>
+
+  <div class="cell center">
+    <div class="mode"><span class="on">COURSE</span><span>MAISON</span><span>R&amp;D</span><span>TRAVAIL</span></div>
+    <div>
+      <div class="big">3:27.418 <small>dernier tour</small></div>
+      <div class="answer" style="margin-top:22px">Meilleur tour personnel, Alex. <em>−0,212 s</em> au premier secteur : le freinage du virage Dunlop est enfin propre.</div>
+    </div>
+    <div class="wave" id="wave"></div>
+    <div class="prompt"><span class="ptt">PTT</span>Bouton 7 du volant ou « Jarvis… » — Ctrl Alt Espace</div>
+  </div>
+
+  <div class="cell stack">
+    <div>
+      <div class="label">Maison</div>
+      <div class="row"><span><i class="dot on"></i>Prise simulateur</span><span class="v">ON</span></div>
+      <div class="row"><span><i class="dot on"></i>Lampe salon</span><span class="v">30 %</span></div>
+      <div class="row"><span><i class="dot"></i>Lampe chambre</span><span class="v">OFF</span></div>
+    </div>
+    <div>
+      <div class="label">Planning</div>
+      <div class="row"><span>Brief équipe</span><span class="v">09:00</span></div>
+      <div class="row"><span>Entretien Karim</span><span class="v">11:30</span></div>
+      <div class="row"><span>Course LMU — Le Mans</span><span class="v">21:00</span></div>
+    </div>
+    <div>
+      <div class="label">Écarts</div>
+      <div class="row"><span>P3 Ferrari #50</span><span class="v delta neg">+2.814</span></div>
+      <div class="row"><span>P5 Porsche #6</span><span class="v delta">−4.102</span></div>
+    </div>
+  </div>
+
+  <div class="cell bottom">
+    <div class="cell"><div class="label">Énergie</div><div class="metric">38<small> %</small></div><div class="bar"><i style="width:38%"></i></div></div>
+    <div class="cell"><div class="label">Tours restants</div><div class="metric">11<small> tours</small></div><div class="bar"><i style="width:55%"></i></div></div>
+    <div class="cell"><div class="label">Pneus AVG</div><div class="metric">92<small> °C</small></div><div class="bar"><i style="width:78%;background:var(--red)"></i></div></div>
+    <div class="cell"><div class="label">Position</div><div class="metric">P4<small> / 23</small></div><div class="bar"><i style="width:82%;background:var(--green)"></i></div></div>
+    <div class="cell"><div class="label">Caméras</div><div class="cams"><div data-n="CAM 1 · BAQUET"></div><div data-n="CAM 2 · ÉCRAN"></div><div data-n="CAM 3 · PIÈCE"></div></div></div>
+  </div>
+</div>
+<script>
+const leds = document.getElementById("leds");
+const colors = ["g","g","g","g","o","o","o","r","r","r","p","p"];
+colors.forEach((c, i) => { const e = document.createElement("i"); if (i < 9) e.className = c; leds.append(e); });
+const wave = document.getElementById("wave");
+for (let i = 0; i < 120; i++) { const e = document.createElement("i"); e.style.height = `${8 + Math.abs(Math.sin(i * 0.35) * Math.cos(i * 0.09)) * 52}px`; wave.append(e); }
+</script>
+</body>
+</html>

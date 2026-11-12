@@ -1,0 +1,44 @@
+name: Jarvis Windows (installateur et mise à jour)
+
+# À chaque envoi sur main : fabrique l'installateur Windows et le publie comme
+# nouvelle version (onglet « Releases »). Les Jarvis installés la téléchargent
+# seuls et l'installent au redémarrage suivant.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/jarvis-windows.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  installateur:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @muscu/jarvis-desktop typecheck
+      - name: Numéro de version
+        shell: pwsh
+        working-directory: apps/jarvis-desktop
+        run: npm version "0.3.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+      - name: Installateur et publication
+        working-directory: apps/jarvis-desktop
+        run: node build.mjs && npx electron-builder --win nsis --x64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Jarvis-installation
+          path: apps/jarvis-desktop/release/*.exe
+          retention-days: 30

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Concept 4 — Signal</title>
+<style>
+@font-face { font-family: "Doto"; src: url("doto.woff2"); }
+@font-face { font-family: "JB"; src: url("jetbrains-mono.woff2"); font-weight: 100 800; }
+@font-face { font-family: "Inter"; src: url("inter.woff2"); font-weight: 100 900; }
+:root { --bg: #000; --text: #ededed; --muted: #6b6b6b; --line: #1c1c1c; --red: #ff2a2a; }
+* { box-sizing: border-box; margin: 0; }
+body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); font-family: "Inter", sans-serif;
+  background-image: radial-gradient(#1a1a1a 1px, transparent 1px); background-size: 22px 22px; }
+.grid { display: grid; grid-template-columns: repeat(12, 1fr); grid-template-rows: 90px 1fr 1fr 110px; gap: 14px; height: 100%; padding: 26px 30px; }
+.tile { border: 1px solid var(--line); border-radius: 28px; background: #070707; padding: 20px 22px; position: relative; overflow: hidden; }
+.t { font: 500 11px "JB"; color: var(--muted); letter-spacing: 0.12em; text-transform: uppercase; }
+.dots { font-family: "Doto", monospace; font-weight: 400; }
+.head { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; border: 0; background: transparent; padding: 0 6px; }
+.head .dots { font-size: 44px; letter-spacing: 0.08em; }
+.head .rec { display: flex; align-items: center; gap: 10px; font: 500 12px "JB"; color: var(--muted); }
+.head .rec i { width: 10px; height: 10px; border-radius: 50%; background: var(--red); box-shadow: 0 0 14px var(--red); }
+/* Le « visage » de Jarvis : une matrice de points qui s'allume avec la voix. */
+.face { grid-column: 4 / span 6; grid-row: 2 / span 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 26px; border-color: #2a2a2a; }
+canvas { width: 420px; height: 420px; }
+.face p { font-size: 20px; line-height: 1.45; text-align: center; max-width: 560px; color: #cfcfcf; }
+.face p b { color: #fff; font-weight: 500; }
+.side1 { grid-column: 1 / span 3; grid-row: 2; }
+.side2 { grid-column: 1 / span 3; grid-row: 3; }
+.side3 { grid-column: 10 / span 3; grid-row: 2; }
+.side4 { grid-column: 10 / span 3; grid-row: 3; }
+.huge { font-family: "Doto", monospace; font-size: 74px; line-height: 1; margin-top: 18px; }
+.huge small { font: 400 14px "JB"; color: var(--muted); }
+.list { margin-top: 16px; display: flex; flex-direction: column; gap: 12px; font-size: 14px; }
+.list div { display: flex; justify-content: space-between; }
+.list span:last-child { font-family: "JB"; color: var(--muted); }
+.list .on span:last-child { color: var(--red); }
+.foot { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; }
+.input { flex: 1; height: 64px; border-radius: 32px; border: 1px solid #2a2a2a; display: flex; align-items: center; padding: 0 26px; color: var(--muted); font-size: 16px; background: #070707; }
+.btn { width: 64px; height: 64px; border-radius: 50%; background: var(--red); display: grid; place-items: center; font: 700 12px "JB"; color: #fff; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="tile head"><div class="dots">JARVIS</div><div class="rec"><i></i>À L'ÉCOUTE · 3 CAMÉRAS · 21:04</div></div>
+  <div class="tile side1"><div class="t">Dernier tour · LMU</div><div class="huge">3:27.4<small> PB</small></div></div>
+  <div class="tile side2"><div class="t">Maison</div><div class="list"><div class="on"><span>Prise simulateur</span><span>ON</span></div><div class="on"><span>Salon</span><span>30%</span></div><div><span>Chambre</span><span>OFF</span></div></div></div>
+  <div class="tile face"><canvas id="m" width="840" height="840"></canvas><p>Le pédalier que tu regardes vaut le coup <b>si tu gardes le T300 un an de plus</b>. Sinon, garde ce budget pour une base direct drive.</p></div>
+  <div class="tile side3"><div class="t">Aujourd'hui</div><div class="list"><div><span>Brief équipe</span><span>09:00</span></div><div><span>Entretien Karim</span><span>11:30</span></div><div class="on"><span>Course LMU</span><span>21:00</span></div></div></div>
+  <div class="tile side4"><div class="t">Mails</div><div class="huge">02<small> non lus</small></div></div>
+  <div class="foot"><div class="input">Écris, ou dis « Jarvis »…</div><div class="btn">PARLE</div></div>
+</div>
+<script>
+// Matrice de 21×21 points : ils s'allument en onde depuis le centre quand Jarvis parle.
+const c = document.getElementById("m"); const g = c.getContext("2d"); const N = 21; const s = c.width / N;
+function draw(t) {
+  g.clearRect(0, 0, c.width, c.height);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const dx = x - (N - 1) / 2, dy = y - (N - 1) / 2, d = Math.hypot(dx, dy);
+    if (d > N / 2) continue;
+    const v = Math.max(0, Math.sin(d * 0.9 - t / 220)) * Math.max(0, 1 - d / (N / 2)) ;
+    const on = v > 0.25;
+    g.beginPath(); g.arc(x * s + s / 2, y * s + s / 2, s * (on ? 0.34 : 0.18), 0, Math.PI * 2);
+    g.fillStyle = on ? (d < 2.2 ? "#ff2a2a" : `rgba(237,237,237,${0.35 + v * 0.65})`) : "#1f1f1f"; g.fill();
+  }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

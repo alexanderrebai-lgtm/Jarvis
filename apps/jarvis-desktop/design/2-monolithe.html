@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Concept 2 — Monolithe</title>
+<style>
+@font-face { font-family: "Serif"; src: url("instrument-serif.woff2"); }
+@font-face { font-family: "Inter"; src: url("inter.woff2"); font-weight: 100 900; }
+:root { --bg: #14110f; --text: #f3ebe1; --muted: rgba(243, 235, 225, 0.45); --faint: rgba(243, 235, 225, 0.16); --warm: #ff7b54; --sand: #e8c9a0; }
+* { box-sizing: border-box; margin: 0; }
+body { height: 100vh; overflow: hidden; background: radial-gradient(ellipse at 50% 110%, rgba(255, 123, 84, 0.22), transparent 60%), var(--bg); color: var(--text); font-family: "Inter", sans-serif; }
+.frame { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px; }
+/* Bandeau discret en haut : tout le reste n'apparaît que si on le demande. */
+.top { position: absolute; top: 34px; left: 48px; right: 48px; display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); letter-spacing: 0.04em; }
+.top b { font-weight: 500; color: var(--text); letter-spacing: 0.3em; }
+.top .pills { display: flex; gap: 22px; }
+.top .pills span::before { content: "●"; margin-right: 8px; color: var(--warm); font-size: 9px; vertical-align: 2px; }
+.quote { font: 400 64px/1.12 "Serif", serif; text-align: center; max-width: 1050px; letter-spacing: -0.01em; }
+.quote i { color: var(--sand); }
+.asked { margin-bottom: 40px; color: var(--muted); font-size: 16px; }
+.asked::before { content: "Tu as dit — "; color: var(--faint); }
+canvas { width: 900px; height: 120px; margin-top: 54px; }
+.hint { margin-top: 18px; color: var(--faint); font-size: 13px; letter-spacing: 0.06em; }
+/* Les « cartes » remontent du bas quand elles sont utiles, puis redescendent. */
+.cards { position: absolute; bottom: 40px; display: flex; gap: 14px; }
+.card { width: 230px; padding: 16px 18px; border-radius: 18px; background: rgba(243, 235, 225, 0.05); border: 1px solid var(--faint); font-size: 14px; line-height: 1.5; }
+.card h4 { font: 400 22px "Serif", serif; margin-bottom: 6px; }
+.card small { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="top"><b>JARVIS</b><div class="pills"><span>J'écoute</span><span style="opacity:.5">Caméras</span></div><div>Jeudi 12 novembre · 21:04</div></div>
+  <div class="asked">« Je pars sur quelle offre, d'après toi ? »</div>
+  <div class="quote">Franchement ? La seconde. <i>Moins 250 € par mois</i>, mais tu récupères dix heures de trajet par semaine — et tu détestes les bouchons.</div>
+  <canvas id="wave" width="1800" height="240"></canvas>
+  <div class="hint">Dis « Jarvis », claque des mains, ou commence simplement à écrire</div>
+  <div class="cards">
+    <div class="card"><h4>21:00</h4>Course LMU — Le Mans<br><small>dans 4 minutes</small></div>
+    <div class="card"><h4>Salon 30 %</h4>Prise du simulateur allumée<br><small>maison</small></div>
+    <div class="card"><h4>2 mails</h4>Planning de décembre, championnat GT3<br><small>rien d'urgent</small></div>
+  </div>
+</div>
+<script>
+// Une seule ligne vivante, comme une respiration : elle s'anime quand Jarvis parle.
+const c = document.getElementById("wave"); const g = c.getContext("2d");
+function draw(t) {
+  g.clearRect(0, 0, c.width, c.height);
+  for (let k = 0; k < 3; k++) {
+    g.beginPath();
+    for (let x = 0; x <= c.width; x += 4) {
+      const p = x / c.width; const env = Math.sin(Math.PI * p) ** 2;
+      const y = c.height / 2 + Math.sin(p * 18 + t / 400 + k * 1.7) * 70 * env * (1 - k * 0.28) * (0.7 + 0.3 * Math.sin(t / 700));
+      x ? g.lineTo(x, y) : g.moveTo(x, y);
+    }
+    g.strokeStyle = ["#ff7b54", "#e8c9a0", "rgba(243,235,225,0.5)"][k]; g.lineWidth = 3 - k * 0.8; g.globalAlpha = 1 - k * 0.3; g.stroke();
+  }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
