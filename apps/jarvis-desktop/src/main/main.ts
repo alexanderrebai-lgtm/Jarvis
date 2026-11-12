@@ -1637,7 +1637,13 @@ async function setupUpdates(): Promise<void> {
     updateStatus = "Mode développement : mets à jour avec « git pull » puis « pnpm start ».";
     return;
   }
-  const { autoUpdater } = await import("electron-updater");
+  // electron-updater est un module CommonJS : selon le chargement, autoUpdater est direct ou sous « default ».
+  const mod = (await import("electron-updater")) as unknown as { autoUpdater?: NonNullable<typeof updater>; default?: { autoUpdater?: NonNullable<typeof updater> } };
+  const autoUpdater = mod.autoUpdater ?? mod.default?.autoUpdater;
+  if (!autoUpdater) {
+    updateStatus = "Impossible de vérifier : module de mise à jour introuvable.";
+    return;
+  }
   updater = autoUpdater;
   const url = env("MISE_A_JOUR_URL");
   if (url) autoUpdater.setFeedURL({ provider: "generic", url });
@@ -1871,7 +1877,11 @@ void app.whenReady().then(async () => {
   veille.start();
   papers.start();
   backups.start();
-  void setupUpdates();
+  // Un souci de mise à jour ne doit jamais empêcher Jarvis de démarrer.
+  void setupUpdates().catch((error) => {
+    updateStatus = `Impossible de vérifier : ${error instanceof Error ? error.message : String(error)}`;
+    console.warn("[mise à jour]", error);
+  });
   // Bibliothèque et relevés : un passage au démarrage, puis régulièrement.
   setTimeout(() => void library.scan().catch((e) => console.warn("[bibliothèque]", e)), 3 * 60_000);
   setInterval(() => void library.scan().catch(() => undefined), 15 * 60_000);
