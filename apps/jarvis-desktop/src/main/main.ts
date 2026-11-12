@@ -25,7 +25,7 @@ import { protectedTarget } from "../shared/policy.js";
 import { ConversationWindow, detectWake } from "../shared/wake.js";
 import { ActionLog, FileVersions, recycleScript, summarizeInput } from "./actions.js";
 import { BackupService, listBackups } from "./backup.js";
-import { Brain, type BrainReply } from "./brain.js";
+import { Brain, findClaudeExecutable, type BrainReply } from "./brain.js";
 import { Budget } from "./budget.js";
 import { jarvisMcpServer, ScreenMap, type DesktopHost, type ScreenShot } from "./desktop-tools.js";
 import { claudeLoginCheck, runChecks, sayDiagnostic, type Check } from "./diagnostic.js";
@@ -1089,7 +1089,10 @@ let senses = { micro: false, cameras: 0, gestes: false, detecteur: false };
 
 async function runDiagnostic() {
   const checks: Check[] = [
-    { id: "claude", groupe: "Cerveau", titre: "Connexion à Claude", run: () => claudeLoginCheck() },
+    { id: "claude", groupe: "Cerveau", titre: "Connexion à Claude", run: () => {
+      const r = claudeLoginCheck();
+      return r.etat === "ok" ? r : { ...r, conseil: "Réglages → Cerveau → « Se connecter à Claude ».", action: { libelle: "Se connecter à Claude", reglages: "cerveau" } };
+    } },
     { id: "ia-locale", groupe: "Cerveau", titre: "IA locale (secours)", run: async () => {
       const models = await localAI.models().catch(() => undefined);
       return models?.length ? { etat: "ok", detail: `${models.length} modèle(s) : ${models.slice(0, 4).map((m) => m.nom).join(", ")}` } : { etat: "absent", detail: "Ollama n'est pas installé ou n'a pas de modèle.", conseil: "Installe Ollama (ollama.com), puis « ollama pull qwen3:14b » : Jarvis répondra même sans Internet." };
@@ -1765,6 +1768,14 @@ async function runSettingAction(id: string): Promise<{ ok: boolean; message: str
       case "voix":
         void handleCommand("apprends ma voix", "clavier");
         return { ok: true, message: "Répète les phrases que Jarvis te donne." };
+      case "claude": {
+        const exe = findClaudeExecutable();
+        if (!exe) return { ok: false, message: "Le moteur Claude n'est pas dans cette version de Jarvis : installe la dernière version depuis l'onglet Releases du dépôt Jarvis." };
+        if (process.platform !== "win32") return { ok: false, message: `Lance « ${exe} » dans un terminal pour te connecter.` };
+        // Fenêtre de Claude Code : au premier lancement, il propose la connexion avec ton compte.
+        spawn("cmd.exe", ["/c", "start", "Connexion à Claude", exe], { detached: true, stdio: "ignore", windowsHide: false }).unref();
+        return { ok: true, message: "Une fenêtre noire s'ouvre : choisis un thème (Entrée), puis « Claude account with subscription », et valide dans le navigateur. Quand c'est fait, tape /exit dans la fenêtre, puis redémarre Jarvis." };
+      }
       case "ollama": {
         const models = await localAI.models();
         return models.length ? { ok: true, message: `Modèles locaux : ${models.map((m) => m.nom).join(", ")}.` } : { ok: false, message: "Ollama répond mais n'a aucun modèle : « ollama pull qwen3:14b »." };

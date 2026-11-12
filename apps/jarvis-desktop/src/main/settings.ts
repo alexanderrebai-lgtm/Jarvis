@@ -145,14 +145,14 @@ export const SETTING_GROUPS: SettingGroup[] = [
   {
     id: "cerveau",
     titre: "Cerveau et IA locale",
-    description: "Sans clé API, Jarvis utilise ton abonnement Claude (lance « claude » une fois dans un terminal pour te connecter).",
+    description: "Sans clé API, Jarvis utilise ton abonnement Claude. Clique sur « Se connecter à Claude » : une fenêtre s'ouvre, choisis la connexion avec ton compte Claude et valide dans le navigateur. À faire une seule fois.",
     champs: [
       { cle: "ANTHROPIC_API_KEY", libelle: "Clé API Anthropic (facultatif, facturée à l'usage)", type: "secret", redemarrage: true },
       { cle: "OLLAMA_URL", libelle: "Adresse d'Ollama", type: "texte", exemple: "http://127.0.0.1:11434", redemarrage: true },
       { cle: "IA_LOCALE_MODELE", libelle: "Modèle local préféré", type: "texte", exemple: "qwen3:14b", redemarrage: true },
       { cle: "OPENALEX_CLE", libelle: "Clé OpenAlex (recherche scientifique)", type: "secret", redemarrage: true },
     ],
-    actions: [{ id: "ollama", libelle: "Tester l'IA locale" }],
+    actions: [{ id: "claude", libelle: "Se connecter à Claude" }, { id: "ollama", libelle: "Tester l'IA locale" }],
   },
   {
     id: "sauvegardes",

@@ -215,10 +215,10 @@ export class Brain {
 /** Les erreurs techniques (souvent en anglais) expliquées en français. */
 export function explain(error: string): string {
   if (/native cli binary|pathToClaudeCodeExecutable|ENOENT.*claude|spawn .*claude/i.test(error)) {
-    return "Mon moteur Claude est introuvable sur ce PC. Installe Claude Code (dans PowerShell : irm https://claude.ai/install.ps1 | iex), connecte-toi avec « claude », puis redémarre-moi.";
+    return "Mon moteur Claude est introuvable sur ce PC. Installe la dernière version de Jarvis (onglet Releases du dépôt Jarvis), puis connecte-toi dans Réglages, carte Cerveau.";
   }
   if (/login|auth|credential|401|not logged|invalid api key|oauth/i.test(error)) {
-    return "Je n'arrive pas à me connecter à Claude. Ouvre PowerShell, lance « claude » et connecte-toi avec ton compte.";
+    return "Je ne suis pas connectée à ton compte Claude. Va dans Réglages, carte Cerveau, et clique sur « Se connecter à Claude ».";
   }
   if (/rate|limit|429|usage|quota/i.test(error)) return "J'ai atteint la limite d'utilisation de ton abonnement pour le moment. Réessaie un peu plus tard.";
   if (/ENOTFOUND|network|fetch failed|ECONN|ETIMEDOUT|socket hang up/i.test(error)) return "Je n'ai plus accès à Internet.";

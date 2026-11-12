@@ -49,7 +49,7 @@ export function claudeLoginCheck(env: NodeJS.ProcessEnv = process.env, home = ho
   if (env.ANTHROPIC_API_KEY?.trim()) return { etat: "ok", detail: "Clé API réglée (facturée à l'usage)." };
   const candidates = [path.join(home, ".claude", ".credentials.json"), path.join(home, ".claude.json")];
   if (candidates.some((c) => existsSync(c))) return { etat: "ok", detail: "Connexion Claude Code trouvée (ton abonnement)." };
-  return { etat: "erreur", detail: "Aucune connexion à Claude.", conseil: "Ouvre un terminal, lance « claude » et connecte-toi avec ton compte Claude." };
+  return { etat: "erreur", detail: "Aucune connexion à Claude.", conseil: "Réglages → Cerveau → « Se connecter à Claude »." };
 }
 
 /** Résumé en une phrase, pour la voix. */

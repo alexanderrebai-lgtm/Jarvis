@@ -61,7 +61,7 @@ describe("cerveau", () => {
   it("explique simplement un problème de connexion à Claude", async () => {
     const { fn } = fakeQuery(() => [new Error("Invalid API key · Please run /login (not logged in)")]);
     const reply = await brain(fn).ask("Salut");
-    expect(reply.text).toMatch(/lance « claude »/);
+    expect(reply.text).toMatch(/Se connecter à Claude/);
   });
 
   it("une demande séparée (tri des mails) ne touche pas la conversation principale", async () => {
