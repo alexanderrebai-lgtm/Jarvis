@@ -91,3 +91,14 @@ describe("clics à l'écran", () => {
     expect(() => new ScreenMap().toPhysical(1, 1)).toThrow(/capture d'écran/);
   });
 });
+
+describe("messages d'erreur en français", () => {
+  it("traduit les erreurs techniques et trouve le moteur Claude", async () => {
+    const { explain, findClaudeExecutable } = await import("../src/main/brain.js");
+    expect(explain("Native CLI binary for win32-x64 not found. Reinstall @anthropic-ai/claude-agent-sdk")).toContain("moteur Claude est introuvable");
+    expect(explain("Error: 429 rate_limit_error")).toContain("limite");
+    expect(explain("something weird happened")).not.toMatch(/something/);
+    const found = findClaudeExecutable({ CLAUDE_CODE_CHEMIN: "" }, (p) => p.includes(`${path.sep}claude${path.sep}claude`), "/res");
+    expect(found).toBe(path.join("/res", "claude", process.platform === "win32" ? "claude.exe" : "claude"));
+  });
+});

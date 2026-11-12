@@ -92,6 +92,15 @@
         "repo": "Jarvis",
         "releaseType": "release"
       }
+    ],
+    "extraResources": [
+      {
+        "from": "build-resources/claude",
+        "to": "claude",
+        "filter": [
+          "**/*"
+        ]
+      }
     ]
   }
 }

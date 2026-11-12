@@ -1,5 +1,5 @@
 // Assemble Jarvis : processus principal (Node), passerelle et interface (navigateur).
-import { cpSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { build } from "esbuild";
 
@@ -45,4 +45,16 @@ cpSync("design/jetbrains-mono.woff2", path.join(out, "renderer", "fonts", "jetbr
 // Fichiers de calcul (WebAssembly) de la reconnaissance des gestes.
 const vision = path.join("node_modules", "@mediapipe", "tasks-vision");
 cpSync(path.join(vision, "wasm"), path.join(out, "renderer", "wasm"), { recursive: true });
+// Moteur Claude (claude.exe) pour Windows : copié à part pour l'installateur (il doit rester hors de l'archive asar).
+rmSync("build-resources", { recursive: true, force: true });
+if (process.platform === "win32") {
+  const store = path.join("..", "..", "node_modules", ".pnpm");
+  const pkg = existsSync(store) ? readdirSync(store).find((n) => n.startsWith("@anthropic-ai+claude-agent-sdk-win32-x64@")) : undefined;
+  const exe = pkg && path.join(store, pkg, "node_modules", "@anthropic-ai", "claude-agent-sdk-win32-x64", "claude.exe");
+  if (exe && existsSync(exe)) {
+    mkdirSync(path.join("build-resources", "claude"), { recursive: true });
+    cpSync(exe, path.join("build-resources", "claude", "claude.exe"));
+    console.log("Moteur Claude pour Windows embarqué.");
+  } else console.warn("ATTENTION : claude.exe (claude-agent-sdk-win32-x64) introuvable : l'installateur utilisera le Claude Code installé sur le PC.");
+}
 console.log("Jarvis assemblé dans dist/");

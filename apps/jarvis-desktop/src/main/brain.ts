@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import { query as sdkQuery, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { JsonStore } from "@muscu/jarvis/src/store.js";
 import { decide, type PolicyContext } from "../shared/policy.js";
@@ -22,6 +25,22 @@ export interface BrainReply {
 }
 
 export type QueryFn = typeof sdkQuery;
+
+/**
+ * Le moteur Claude (claude.exe) : celui embarqué dans l'installateur, sinon le
+ * Claude Code installé sur le PC, sinon celui du SDK (mode développement).
+ */
+export function findClaudeExecutable(env: NodeJS.ProcessEnv = process.env, exists: (p: string) => boolean = existsSync, resources = (process as { resourcesPath?: string }).resourcesPath): string | undefined {
+  const exe = process.platform === "win32" ? "claude.exe" : "claude";
+  const candidates = [
+    env.CLAUDE_CODE_CHEMIN?.trim(),
+    resources ? path.join(resources, "claude", exe) : undefined,
+    path.join(homedir(), ".local", "bin", exe),
+    env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, "Programs", "claude", exe) : undefined,
+    env.APPDATA ? path.join(env.APPDATA, "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", exe) : undefined,
+  ].filter((p): p is string => Boolean(p));
+  return candidates.find((p) => exists(p));
+}
 
 interface SessionState {
   sessionId?: string;
@@ -55,6 +74,12 @@ export class Brain {
   private readonly state: JsonStore<SessionState>;
   private queue: Promise<unknown> = Promise.resolve();
   private current: AbortController | undefined;
+  private executableCache: string | null | undefined;
+
+  private get executable(): string | undefined {
+    if (this.executableCache === undefined) this.executableCache = this.options.queryFn ? null : (findClaudeExecutable() ?? null);
+    return this.executableCache ?? undefined;
+  }
 
   constructor(private readonly options: BrainOptions) {
     this.state = new JsonStore(options.dataDir, "session", () => ({}));
@@ -134,6 +159,7 @@ export class Brain {
       abortController: abort,
       maxTurns: 60,
       ...(this.options.model ? { model: this.options.model } : {}),
+      ...(this.executable ? { pathToClaudeCodeExecutable: this.executable } : {}),
       ...(session.sessionId ? { resume: session.sessionId } : {}),
     };
 
@@ -162,7 +188,10 @@ export class Brain {
       if (!external) this.current = undefined;
     }
     const reply = (finalText || text).trim();
-    if (!reply && error) return { text: explain(error), error };
+    if (!reply && error) {
+      console.error("[cerveau]", error);
+      return { text: explain(error), error };
+    }
     return { text: reply || "C'est fait.", ...(costUsd !== undefined ? { costUsd } : {}), ...(error ? { error } : {}) };
   }
 
@@ -183,11 +212,18 @@ export class Brain {
   }
 }
 
-function explain(error: string): string {
-  if (/login|auth|credential|401|not logged/i.test(error)) {
-    return "Je n'arrive pas à me connecter à Claude. Ouvre un terminal et lance « claude », puis connecte-toi avec ton compte.";
+/** Les erreurs techniques (souvent en anglais) expliquées en français. */
+export function explain(error: string): string {
+  if (/native cli binary|pathToClaudeCodeExecutable|ENOENT.*claude|spawn .*claude/i.test(error)) {
+    return "Mon moteur Claude est introuvable sur ce PC. Installe Claude Code (dans PowerShell : irm https://claude.ai/install.ps1 | iex), connecte-toi avec « claude », puis redémarre-moi.";
   }
-  if (/rate|limit|429|usage/i.test(error)) return "J'ai atteint la limite d'utilisation de ton abonnement pour le moment. Réessaie un peu plus tard.";
-  if (/ENOTFOUND|network|fetch failed|ECONN/i.test(error)) return "Je n'ai plus accès à Internet, Alex.";
-  return `J'ai eu un problème technique : ${error.slice(0, 160)}`;
+  if (/login|auth|credential|401|not logged|invalid api key|oauth/i.test(error)) {
+    return "Je n'arrive pas à me connecter à Claude. Ouvre PowerShell, lance « claude » et connecte-toi avec ton compte.";
+  }
+  if (/rate|limit|429|usage|quota/i.test(error)) return "J'ai atteint la limite d'utilisation de ton abonnement pour le moment. Réessaie un peu plus tard.";
+  if (/ENOTFOUND|network|fetch failed|ECONN|ETIMEDOUT|socket hang up/i.test(error)) return "Je n'ai plus accès à Internet.";
+  if (/overloaded|529|503|502/i.test(error)) return "Les serveurs de Claude sont surchargés. Je réessaierai dans un instant.";
+  if (/max.?turns/i.test(error)) return "La tâche était trop longue pour être faite d'un seul tenant. Demande-moi de la lancer en tâche de fond.";
+  if (/abort/i.test(error)) return "D'accord, j'arrête.";
+  return "J'ai eu un problème technique. Le détail est dans le journal d'erreurs ; la page Diagnostic peut aider.";
 }
