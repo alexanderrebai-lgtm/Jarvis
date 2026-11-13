@@ -231,3 +231,13 @@ describe("Spotify", () => {
     expect(calls).toContain("PUT /me/player/volume?volume_percent=30&device_id=pc");
   });
 });
+
+describe("erreurs Spotify en français", () => {
+  it("lit une réponse en texte brut sans planter", async () => {
+    const fetchFn = (async (url: string | URL) =>
+      String(url).includes("accounts.spotify.com") ? new Response(JSON.stringify({ access_token: "a", expires_in: 3600 })) : new Response("Active premium subscription required for the owner of the app.", { status: 403 })) as unknown as typeof fetch;
+    let tokens: { access: string; refresh: string; expiresAt: number } | undefined = { access: "", refresh: "r", expiresAt: 0 };
+    const client = new SpotifyClient({ clientId: "c", load: () => tokens, save: (t) => (tokens = t), fetchFn });
+    await expect(client.devices()).rejects.toThrow(/compte qui a créé l'appli/);
+  });
+});

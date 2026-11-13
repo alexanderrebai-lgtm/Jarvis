@@ -57,6 +57,17 @@ export function toSpotifyUri(link: string): string | undefined {
   return m ? `spotify:${m[1]}:${m[2]}` : undefined;
 }
 
+/** Les refus de Spotify expliqués en français. */
+export function explainSpotify(status: number, message: string): string {
+  if (/premium/i.test(message) && /owner|app/i.test(message)) return "Spotify refuse : le compte qui a créé l'appli sur developer.spotify.com doit avoir un abonnement Premium actif. Crée l'appli avec ton compte Premium (pas un compte gratuit ou un membre d'un abonnement Famille qui n'est pas le titulaire), puis colle son nouveau Client ID dans les Réglages.";
+  if (/premium/i.test(message)) return "Spotify demande un compte Premium pour piloter la lecture.";
+  if (status === 403 && /user|allowlist|not registered|developer/i.test(message)) return "Spotify refuse : ton compte n'est pas autorisé sur l'appli. Sur developer.spotify.com → ton appli → Settings → User Management, ajoute ton nom et l'adresse e-mail de ton compte Spotify.";
+  if (status === 401) return "La connexion à Spotify a expiré : clique à nouveau sur « Connecter Spotify ».";
+  if (status === 404 && /device/i.test(message)) return "Aucun appareil Spotify actif : ouvre l'appli Spotify sur le PC.";
+  if (status === 429) return "Spotify demande d'attendre un peu (trop de demandes).";
+  return `Spotify : ${message} (erreur ${status})`;
+}
+
 export class SpotifyError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
@@ -155,11 +166,18 @@ export class SpotifyClient {
     const res = await this.fetchFn(url, { method, headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     if (res.status === 204 || res.status === 202) return undefined;
     const text = await res.text();
-    const data = text ? (JSON.parse(text) as unknown) : undefined;
-    if (!res.ok) {
-      const message = (data as { error?: { message?: string } } | undefined)?.error?.message ?? res.statusText;
-      throw new SpotifyError(res.status === 403 && /premium/i.test(message) ? "Spotify demande un compte Premium pour piloter la lecture." : `Spotify : ${message} (${res.status})`, res.status);
+    // Spotify répond parfois par une simple phrase au lieu de JSON (« Active premium subscription required… »).
+    let data: unknown;
+    try {
+      data = text ? JSON.parse(text) : undefined;
+    } catch {
+      data = undefined;
     }
+    if (!res.ok) {
+      const message = (data as { error?: { message?: string } } | undefined)?.error?.message ?? (text.trim() || res.statusText);
+      throw new SpotifyError(explainSpotify(res.status, message), res.status);
+    }
+    if (data === undefined && text.trim()) throw new SpotifyError(`Réponse inattendue de Spotify : ${text.trim().slice(0, 120)}`, res.status);
     return data as T;
   }
 
