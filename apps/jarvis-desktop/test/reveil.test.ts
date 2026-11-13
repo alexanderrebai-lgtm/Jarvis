@@ -241,3 +241,15 @@ describe("erreurs Spotify en français", () => {
     await expect(client.devices()).rejects.toThrow(/compte qui a créé l'appli/);
   });
 });
+
+describe("module Musique", () => {
+  it("lit le titre, l'artiste, la pochette et la progression", async () => {
+    const fetchFn = (async (url: string | URL) =>
+      String(url).includes("accounts.spotify.com")
+        ? new Response(JSON.stringify({ access_token: "a", expires_in: 3600 }))
+        : new Response(JSON.stringify({ is_playing: true, progress_ms: 61000, item: { uri: "spotify:track:1", name: "Back In Black", duration_ms: 255000, artists: [{ name: "AC/DC" }], album: { name: "Back In Black", images: [{ url: "https://i.scdn.co/big", width: 640 }, { url: "https://i.scdn.co/mid", width: 300 }, { url: "https://i.scdn.co/small", width: 64 }] } }, device: { volume_percent: 40, name: "PC-ALEX" } }))) as unknown as typeof fetch;
+    let tokens: { access: string; refresh: string; expiresAt: number } | undefined = { access: "", refresh: "r", expiresAt: 0 };
+    const client = new SpotifyClient({ clientId: "c", load: () => tokens, save: (t) => (tokens = t), fetchFn });
+    expect(await client.nowPlaying()).toEqual({ actif: true, enLecture: true, titre: "Back In Black", artistes: "AC/DC", album: "Back In Black", pochette: "https://i.scdn.co/mid", positionMs: 61000, dureeMs: 255000, volume: 40, appareil: "PC-ALEX" });
+  });
+});

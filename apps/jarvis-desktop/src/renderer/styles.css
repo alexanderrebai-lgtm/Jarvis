@@ -409,3 +409,25 @@ body.cockpit .panel h4 b { color: var(--orange); font-weight: 600; }
 @media (max-width: 900px) { .settings { grid-template-columns: 1fr; } .settings-menu { flex-direction: row; flex-wrap: wrap; } }
 .settings-content > .setting-group { flex: none; height: auto; min-height: 0; overflow: visible; }
 .settings-content > .setting-group > .body { overflow: visible; flex: none; }
+
+/* ---------- Module Musique (accueil) ---------- */
+.panel.music { flex: 1 1 360px; min-width: 300px; max-width: 520px; display: flex; flex-direction: row; align-items: center; gap: 14px; padding: 12px 16px; }
+.music .mus-cover { width: 104px; height: 104px; flex: none; border-radius: 10px; overflow: hidden; background: rgba(var(--hud-rgb), 0.08); border: 1px solid var(--line); box-shadow: 0 0 18px rgba(93, 255, 168, 0.15); }
+.music .mus-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.music .mus-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.music .mus-info b { font: 600 15px "Inter"; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.music .mus-info span { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.music .mus-bar { height: 4px; border-radius: 4px; background: rgba(var(--hud-rgb), 0.15); margin-top: 8px; overflow: hidden; }
+.music .mus-bar i { display: block; height: 100%; background: var(--green); box-shadow: 0 0 8px var(--green); transition: width 0.9s linear; }
+.music .mus-time { display: flex; justify-content: space-between; font: 11px "Mono"; color: var(--faint); }
+.music .mus-ctrl { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: none; }
+.music .mus-ctrl { display: grid; grid-template-columns: repeat(3, auto); align-items: center; gap: 6px; }
+.music .mus-vol { grid-column: 1 / -1; width: 120px; accent-color: var(--green); }
+.music .mus-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: rgba(var(--hud-rgb), 0.06); color: var(--text); display: grid; place-items: center; cursor: pointer; }
+.music .mus-btn.big { width: 44px; height: 44px; border-color: var(--green); background: rgba(93, 255, 168, 0.12); }
+.music .mus-btn:hover { box-shadow: 0 0 12px rgba(var(--hud-rgb), 0.4); }
+.music .mus-empty { display: flex; align-items: center; gap: 14px; width: 100%; }
+.music .mus-empty b { font: 600 11px "Grotesk"; letter-spacing: 0.24em; text-transform: uppercase; color: var(--green); }
+.music .mus-empty span { color: var(--muted); font-size: 13px; flex: 1; }
+.music .mus-link { border: 1px solid var(--green); background: rgba(93, 255, 168, 0.1); color: var(--text); border-radius: 8px; padding: 6px 12px; cursor: pointer; font: 500 12.5px "Inter"; }
+@media (max-width: 1280px) { .panel.music { max-width: none; } }

@@ -57,7 +57,7 @@ import { deepResearchPrompt, Literature } from "./research/literature.js";
 import { wakeTaskScript, WakeUp } from "./reveil/alarm.js";
 import { parseCodes, PlanningReader, type Shift } from "./reveil/planning.js";
 import { DEFAULT_RULES, parseDays, sayTime } from "./reveil/schedule.js";
-import { SpotifyClient, toSpotifyUri, WAKE_TRACKS, type SpotifyTokens } from "./reveil/spotify.js";
+import { SpotifyClient, toSpotifyUri, WAKE_TRACKS, type NowPlaying, type SpotifyTokens } from "./reveil/spotify.js";
 import { Routines, runRoutine, Timers, type RoutineStep } from "./routines.js";
 import { parseCameras, rtspUrl, SecurityService, type SurveillanceMode } from "./security.js";
 import { elmScript, findElmScript, serialMonitorScript } from "./serial.js";
@@ -737,6 +737,35 @@ const spotifyHelpers: PlusHost["spotify"] = {
     return `« ${now.track.name} » ajouté au réveil.`;
   },
 };
+
+// ---------- Module Musique de l'accueil ----------
+
+let nowPlaying: NowPlaying & { relie: boolean; erreur?: string } = { actif: false, relie: false };
+
+async function refreshMusic(): Promise<typeof nowPlaying> {
+  if (!spotify.connected) nowPlaying = { actif: false, relie: false };
+  else {
+    try {
+      nowPlaying = { ...(await spotify.nowPlaying()), relie: true };
+    } catch (error) {
+      nowPlaying = { actif: false, relie: true, erreur: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  pages.broadcast("musique:etat", nowPlaying, "accueil");
+  return nowPlaying;
+}
+
+async function musicCommand(payload: { action: "lecture" | "pause" | "suivant" | "precedent" | "volume"; valeur?: number }): Promise<typeof nowPlaying> {
+  try {
+    if (payload.action === "lecture") await spotify.play({ ...(spotifyDevice ? { deviceId: spotifyDevice } : {}) }).catch(async () => spotifyHelpers.play());
+    else if (payload.action === "volume") await spotify.volume(payload.valeur ?? 50, spotifyDevice);
+    else await spotifyHelpers.control(payload.action);
+  } catch (error) {
+    nowPlaying = { ...nowPlaying, erreur: error instanceof Error ? error.message : String(error) };
+  }
+  await new Promise((r) => setTimeout(r, 350));
+  return refreshMusic();
+}
 
 const planning = new PlanningReader({
   file: () => env("PLANNING_FICHIER"),
@@ -1603,6 +1632,9 @@ ipcMain.handle("diagnostic:run", async () => {
   return { resultats: results, resume: sayDiagnostic(results), version: app.getVersion() };
 });
 
+ipcMain.handle("musique:etat", () => refreshMusic());
+ipcMain.handle("musique:commande", (_event, payload: Parameters<typeof musicCommand>[0]) => musicCommand(payload));
+
 ipcMain.handle("disposition:appliquer", (_event, name: string) => applyDisposition(name, false));
 
 ipcMain.handle("reveil:passer", async (_event, payload: { date: string; aucun: boolean }) => {
@@ -1924,6 +1956,10 @@ void app.whenReady().then(async () => {
   setInterval(() => void importStatements(), 60 * 60_000);
   // L'accueil se met à jour (rendez-vous, rappels) toutes les minutes.
   setInterval(() => void sendPageData("accueil"), 60_000);
+  // Musique en cours : toutes les 5 secondes quand l'accueil est visible.
+  setInterval(() => {
+    if (pages.window("accueil")?.isVisible() && spotify.connected) void refreshMusic();
+  }, 5_000);
   setTimeout(() => void runDiagnostic().catch(() => undefined), 45_000);
 
   // Le connecteur pour l'app Claude du téléphone et les raccourcis iPhone, si un secret est réglé.

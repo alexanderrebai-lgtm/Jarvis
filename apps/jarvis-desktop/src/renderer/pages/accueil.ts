@@ -1,5 +1,5 @@
 import { api, el, esc, fillPanel, hhmm, ICON, panel, type PanelPayload } from "../common.js";
-import { buildPage, createReactor, gauge, hexes, ICONS, linkToReactor } from "../hud.js";
+import { buildPage, createReactor, gauge, ICONS, linkToReactor } from "../hud.js";
 import { flags, onGesture, startMicrophone, startWebcams, watchWheel } from "../senses.js";
 
 interface HomeData {
@@ -87,7 +87,9 @@ export function renderHome(root: HTMLElement): void {
   const sys = el("section", "panel sysrings");
   sys.dataset.accent = "green";
   bottom!.append(sys, now.root);
-  bottom!.insertAdjacentHTML("beforeend", hexes());
+  const music = el("section", "panel music");
+  music.dataset.accent = "green";
+  bottom!.append(music);
 
   root.append(page);
   linkToReactor(page, reactor);
@@ -248,6 +250,60 @@ export function renderHome(root: HTMLElement): void {
     renderNow();
   });
   void refresh();
+
+  // Musique en cours (Spotify)
+  interface Music { actif: boolean; relie: boolean; enLecture?: boolean; titre?: string; artistes?: string; pochette?: string; positionMs?: number; dureeMs?: number; volume?: number; appareil?: string; erreur?: string }
+  const SVG = (d: string) => `<svg class="i" viewBox="0 0 24 24">${d}</svg>`;
+  const ICON_PLAY = SVG('<path d="M7 5v14l12-7z" fill="currentColor"/>');
+  const ICON_PAUSE = SVG('<path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/>');
+  const ICON_PREV = SVG('<path d="M6 5v14M18 6l-9 6 9 6z"/>');
+  const ICON_NEXT = SVG('<path d="M18 5v14M6 6l9 6-9 6z"/>');
+  const mmss = (ms = 0) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
+  let musicState: Music | undefined;
+  let musicAt = Date.now();
+  const renderMusic = (m: Music) => {
+    musicState = m;
+    musicAt = Date.now();
+    if (!m.relie) {
+      music.innerHTML = `<div class="mus-empty"><b>Musique</b><span>Spotify n'est pas encore relié.</span><button class="mus-link">Relier Spotify</button></div>`;
+      music.querySelector<HTMLButtonElement>(".mus-link")!.onclick = () => api.send("reglages:ouvrir", "spotify");
+      return;
+    }
+    if (!m.actif) {
+      music.innerHTML = `<div class="mus-empty"><b>Musique</b><span>${esc(m.erreur ?? "Rien en lecture. Dis « mets de la musique ».")}</span><button class="mus-btn mus-play" title="Lecture">${ICON_PLAY}</button></div>`;
+      music.querySelector<HTMLButtonElement>(".mus-play")!.onclick = () => void api.invoke<Music>("musique:commande", { action: "lecture" }).then(renderMusic);
+      return;
+    }
+    music.innerHTML = `
+      <div class="mus-cover">${m.pochette ? `<img src="${esc(m.pochette)}" alt="">` : ""}</div>
+      <div class="mus-info">
+        <b title="${esc(m.titre)}">${esc(m.titre)}</b>
+        <span title="${esc(m.artistes)}">${esc(m.artistes)}${m.appareil ? ` · ${esc(m.appareil)}` : ""}</span>
+        <div class="mus-bar"><i style="width:${m.dureeMs ? Math.min(100, ((m.positionMs ?? 0) / m.dureeMs) * 100) : 0}%"></i></div>
+        <div class="mus-time"><span class="pos">${mmss(m.positionMs)}</span><span>${mmss(m.dureeMs)}</span></div>
+      </div>
+      <div class="mus-ctrl">
+        <button class="mus-btn" data-a="precedent" title="Précédent">${ICON_PREV}</button>
+        <button class="mus-btn big" data-a="${m.enLecture ? "pause" : "lecture"}" title="${m.enLecture ? "Pause" : "Lecture"}">${m.enLecture ? ICON_PAUSE : ICON_PLAY}</button>
+        <button class="mus-btn" data-a="suivant" title="Suivant">${ICON_NEXT}</button>
+        <input class="mus-vol" type="range" min="0" max="100" value="${m.volume ?? 50}" title="Volume">
+      </div>`;
+    music.querySelectorAll<HTMLButtonElement>("[data-a]").forEach((b) => (b.onclick = () => void api.invoke<Music>("musique:commande", { action: b.dataset.a }).then(renderMusic)));
+    const vol = music.querySelector<HTMLInputElement>(".mus-vol")!;
+    vol.onchange = () => void api.invoke<Music>("musique:commande", { action: "volume", valeur: Number(vol.value) }).then(renderMusic);
+  };
+  // La barre avance entre deux nouvelles de Spotify.
+  setInterval(() => {
+    const m = musicState;
+    if (!m?.actif || !m.enLecture || !m.dureeMs) return;
+    const pos = Math.min(m.dureeMs, (m.positionMs ?? 0) + (Date.now() - musicAt));
+    const bar = music.querySelector<HTMLElement>(".mus-bar i");
+    const label = music.querySelector<HTMLElement>(".mus-time .pos");
+    if (bar) bar.style.width = `${(pos / m.dureeMs) * 100}%`;
+    if (label) label.textContent = mmss(pos);
+  }, 1000);
+  api.on("musique:etat", (m: Music) => renderMusic(m));
+  void api.invoke<Music>("musique:etat").then(renderMusic);
 
   // Les sens ne vivent que sur l'accueil.
   void startMicrophone().catch((error) => (heard.textContent = `Micro indisponible (${error instanceof Error ? error.message : error}). Vérifie Paramètres Windows → Confidentialité → Microphone.`));

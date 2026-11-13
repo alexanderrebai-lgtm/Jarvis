@@ -26,6 +26,19 @@ export interface SpotifyDevice {
   volume_percent: number | null;
 }
 
+export interface NowPlaying {
+  actif: boolean;
+  enLecture?: boolean;
+  titre?: string;
+  artistes?: string;
+  album?: string;
+  pochette?: string;
+  positionMs?: number;
+  dureeMs?: number;
+  volume?: number;
+  appareil?: string;
+}
+
 export interface SpotifyTrack {
   uri: string;
   name: string;
@@ -235,6 +248,32 @@ export class SpotifyClient {
       ...(data.item ? { track: { uri: data.item.uri, name: data.item.name, artists: (data.item.artists ?? []).map((a) => a.name).join(", ") } } : {}),
       ...(data.device?.volume_percent !== undefined ? { volume: data.device.volume_percent } : {}),
       ...(data.device?.name ? { device: data.device.name } : {}),
+    };
+  }
+
+  /** Ce qui joue en ce moment, pour le module Musique de l'accueil. */
+  async nowPlaying(): Promise<NowPlaying> {
+    const data = await this.api<{
+      is_playing: boolean;
+      progress_ms?: number;
+      shuffle_state?: boolean;
+      item?: { uri: string; name: string; duration_ms?: number; artists?: Array<{ name: string }>; album?: { name?: string; images?: Array<{ url: string; width?: number }> }; show?: { name?: string }; images?: Array<{ url: string; width?: number }> };
+      device?: { volume_percent?: number; name?: string; id?: string };
+    }>("GET", "/me/player", undefined, { additional_types: "track,episode" });
+    if (!data?.item) return { actif: false };
+    const images = data.item.album?.images ?? data.item.images ?? [];
+    const cover = [...images].sort((a, b) => (a.width ?? 0) - (b.width ?? 0)).find((i) => (i.width ?? 300) >= 200) ?? images[0];
+    return {
+      actif: true,
+      enLecture: data.is_playing,
+      titre: data.item.name,
+      artistes: (data.item.artists ?? []).map((a) => a.name).join(", ") || data.item.show?.name || "",
+      album: data.item.album?.name ?? "",
+      ...(cover ? { pochette: cover.url } : {}),
+      positionMs: data.progress_ms ?? 0,
+      dureeMs: data.item.duration_ms ?? 0,
+      ...(data.device?.volume_percent !== undefined ? { volume: data.device.volume_percent } : {}),
+      ...(data.device?.name ? { appareil: data.device.name } : {}),
     };
   }
 
