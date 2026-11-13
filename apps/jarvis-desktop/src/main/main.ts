@@ -1725,7 +1725,11 @@ async function runSettingAction(id: string): Promise<{ ok: boolean; message: str
         const test = new TapoHome(realTapoDriver(env("TAPO_EMAIL")!, env("TAPO_PASSWORD")!, parseDeviceList(env("TAPO_DEVICES"))));
         const states = await test.states();
         if (!states.length) return { ok: false, message: "Connexion faite, mais aucun appareil trouvé. Vérifie que le PC est sur le même réseau que tes ampoules, ou liste-les avec leur adresse IP." };
-        return { ok: true, message: `${states.length} appareil(s) : ${states.map((d) => `${d.nom}${d.allume === null ? " (injoignable)" : ""}`).join(", ")}.`, redemarrage: !tapo };
+        const down = states.filter((d) => d.allume === null);
+        const hint = down.length
+          ? " Injoignables en direct depuis le PC : dans l'appli Tapo, va dans Moi → Tapo Lab → « Compatibilité tierce » (Third-Party Compatibility) et active-la, puis réessaie. Vérifie aussi que le PC et les ampoules sont sur la même box (pas le Wi-Fi invité). Détail : " + down.map((d) => `${d.nom} : ${(d as { erreur?: string }).erreur ?? "pas de réponse"}`).join(" ; ")
+          : "";
+        return { ok: down.length === 0, message: `${states.length} appareil(s) : ${states.map((d) => `${d.nom}${d.allume === null ? " (injoignable)" : d.allume ? " (allumé)" : " (éteint)"}`).join(", ")}.${hint}`, redemarrage: !tapo };
       }
       case "google": {
         if (!env("GOOGLE_CLIENT_ID") || !env("GOOGLE_CLIENT_SECRET")) return { ok: false, message: "Colle d'abord l'ID client et le code secret, puis enregistre." };
