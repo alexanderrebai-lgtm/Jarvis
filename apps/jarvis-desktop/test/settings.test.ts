@@ -35,3 +35,15 @@ describe("page Réglages", () => {
     expect(store.view().secrets.TAPO_PASSWORD).toBe(false);
   });
 });
+
+describe("Telegram", async () => {
+  const { explainTelegram, isTelegramChatId, isTelegramToken } = await import("../src/main/phone.js");
+  it("reconnaît le nom du bot et explique l'erreur 400 en français", () => {
+    expect(isTelegramChatId("Czgqfisjvru_bot")).toBe(false);
+    expect(isTelegramChatId("123456789")).toBe(true);
+    expect(isTelegramToken("123456789:AAHabcdefghijklmnopqrstuvwxyz0123456")).toBe(true);
+    expect(isTelegramToken("Czgqfisjvru_bot")).toBe(false);
+    expect(explainTelegram(400, "Bad Request: chat not found")).toContain("Trouver ma conversation");
+    expect(explainTelegram(401)).toContain("@BotFather");
+  });
+});

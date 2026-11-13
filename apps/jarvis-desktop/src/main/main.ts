@@ -45,7 +45,7 @@ import { PageManager } from "./pages/manager.js";
 import { extractionPrompt, Papers, parseExtraction } from "./papers.js";
 import { PerfMonitor } from "./perf.js";
 import { personaPrompt } from "./persona.js";
-import { PhoneAlerts } from "./phone.js";
+import { isTelegramChatId, isTelegramToken, PhoneAlerts } from "./phone.js";
 import { plusMcpServer, type PlusHost } from "./plus-tools.js";
 import { runPowerShell } from "./pc.js";
 import { Pseudonymizer } from "./privacy.js";
@@ -1804,7 +1804,8 @@ async function runSettingAction(id: string): Promise<{ ok: boolean; message: str
         return { ok: ok.length === cams.length, message: ok.length === cams.length ? "Toutes les caméras répondent." : `Sans réponse : ${images.filter((i) => !i.src).map((i) => i.nom).join(", ")} (adresse IP, identifiant ou mot de passe du compte caméra).`, images: ok, redemarrage: true };
       }
       case "telegram-chat": {
-        if (!env("TELEGRAM_BOT_TOKEN")) return { ok: false, message: "Colle d'abord le jeton du bot, puis enregistre." };
+        if (!env("TELEGRAM_BOT_TOKEN")) return { ok: false, message: "Colle d'abord le jeton du bot (donné par @BotFather), puis enregistre." };
+        if (!isTelegramToken(env("TELEGRAM_BOT_TOKEN"))) return { ok: false, message: "Ce n'est pas un jeton de bot : il ressemble à 123456789:AAH… (message de @BotFather après /newbot). Le nom qui finit par « _bot » ne suffit pas." };
         const chat = await findTelegramChat(env("TELEGRAM_BOT_TOKEN")!);
         if (!chat) return { ok: false, message: "Aucun message trouvé : envoie « bonjour » à ton bot dans Telegram, puis réessaie." };
         settings.save({ TELEGRAM_CHAT_ID: chat.id });
@@ -1812,6 +1813,8 @@ async function runSettingAction(id: string): Promise<{ ok: boolean; message: str
       }
       case "telegram":
         if (!phone.enabled) return { ok: false, message: "Il manque le jeton ou l'identifiant de conversation." };
+        if (!isTelegramToken(env("TELEGRAM_BOT_TOKEN"))) return { ok: false, message: "Le jeton du bot n'a pas la bonne forme : il ressemble à 123456789:AAH… (message de @BotFather)." };
+        if (!isTelegramChatId(env("TELEGRAM_CHAT_ID"))) return { ok: false, message: `« ${env("TELEGRAM_CHAT_ID")} » n'est pas l'identifiant de ta conversation (c'est un nombre, pas le nom du bot). Envoie « bonjour » à ton bot dans Telegram, puis clique sur « Trouver ma conversation » : Jarvis le remplit tout seul.` };
         await phone.text("Jarvis : essai des alertes. Si tu lis ceci, c'est relié.");
         return { ok: true, message: "Message d'essai envoyé sur ton téléphone." };
       case "voix":

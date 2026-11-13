@@ -113,8 +113,8 @@ export const SETTING_GROUPS: SettingGroup[] = [
     titre: "Alertes sur le téléphone (Telegram)",
     description: "Dans Telegram, écris à @BotFather « /newbot », copie le jeton. Envoie un message à ton bot, puis clique sur « Trouver ma conversation ».",
     champs: [
-      { cle: "TELEGRAM_BOT_TOKEN", libelle: "Jeton du bot", type: "secret", redemarrage: true },
-      { cle: "TELEGRAM_CHAT_ID", libelle: "Identifiant de ta conversation", type: "texte", redemarrage: true },
+      { cle: "TELEGRAM_BOT_TOKEN", libelle: "Jeton du bot", type: "secret", redemarrage: true, aide: "Donné par @BotFather, il ressemble à 123456789:AAH…" },
+      { cle: "TELEGRAM_CHAT_ID", libelle: "Identifiant de ta conversation", type: "texte", redemarrage: true, aide: "Un nombre, rempli tout seul par « Trouver ma conversation ». Pas le nom du bot." },
       { cle: "SURVEILLANCE_LUMIERES", libelle: "Lampes de dissuasion", type: "texte", exemple: "tout" },
       { cle: "SURVEILLANCE_DISSUASION", libelle: "Dissuasion (lumières et message)", type: "choix", options: [{ valeur: "true", libelle: "Oui" }, { valeur: "false", libelle: "Non" }] },
     ],
@@ -306,7 +306,7 @@ export async function googleSignIn(options: { clientId: string; clientSecret: st
 export async function findTelegramChat(token: string, fetchFn: typeof fetch = fetch): Promise<{ id: string; nom: string } | undefined> {
   const res = await fetchFn(`https://api.telegram.org/bot${token}/getUpdates`, { signal: AbortSignal.timeout(15_000) });
   const data = (await res.json()) as { ok: boolean; result?: Array<{ message?: { chat: { id: number; first_name?: string; username?: string } } }> };
-  if (!data.ok) throw new Error("Jeton Telegram refusé.");
+  if (!data.ok) throw new Error("Telegram refuse le jeton du bot : recopie-le depuis @BotFather (il ressemble à 123456789:AAH…).");
   const chat = [...(data.result ?? [])].reverse().find((u) => u.message?.chat)?.message?.chat;
   return chat ? { id: String(chat.id), nom: chat.first_name ?? chat.username ?? "" } : undefined;
 }
