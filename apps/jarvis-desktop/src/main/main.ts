@@ -37,6 +37,7 @@ import { Lab } from "./lab.js";
 import { Learning, mentorInstruction } from "./learning.js";
 import { e5Embedder, Library } from "./library/index.js";
 import { LocalAI, localPersona } from "./local-ai.js";
+import { LocalVoice } from "./local-voice.js";
 import { fallbackMorning, morningPrompt, type MorningContext } from "./morning.js";
 import { pageInfo, parsePageCommand, PAGES, type PageId } from "./pages/catalog.js";
 import { DispositionStore, parseDispositionCommand } from "./pages/dispositions.js";
@@ -561,6 +562,11 @@ const brain = new Brain({
   },
 });
 const voice = new Voice(env("JARVIS_VOICE") ?? DEFAULT_VOICE, env("JARVIS_VOICE_RATE") ?? "+0%", env("JARVIS_VOICE_PITCH") ?? "+0Hz");
+const localVoice = new LocalVoice(workspace, { assetsDir: assets, findPython: () => lab.findPython() });
+voice.local = {
+  active: () => env("VOIX_MOTEUR") === "locale" && localVoice.installed,
+  synthesize: (text) => localVoice.synthesize(text, { reference: env("VOIX_REFERENCE"), expressivite: Number((env("VOIX_EXPRESSIVITE") ?? "0.5").replace(",", ".")) || 0.5 }),
+};
 const sttSetting = env("STT_MODEL") ?? "auto";
 const ears = new Ears({ cacheDir: modelCache, model: sttSetting === "auto" ? "onnx-community/whisper-small" : sttSetting, device: env("STT_DEVICE") ?? "dml" });
 const voiceLock = new VoiceLock(config.dataDir, wavlmEmbedder({ cacheDir: modelCache }), "Xenova/wavlm-base-plus-sv", Number(env("VOIX_SEUIL") ?? 0.86));
@@ -1127,7 +1133,13 @@ async function runDiagnostic() {
       return models?.length ? { etat: "ok", detail: `${models.length} modèle(s) : ${models.slice(0, 4).map((m) => m.nom).join(", ")}` } : { etat: "absent", detail: "Ollama n'est pas installé ou n'a pas de modèle.", conseil: "Installe Ollama (ollama.com), puis « ollama pull qwen3:14b » : Jarvis répondra même sans Internet." };
     } },
     { id: "oreilles", groupe: "Voix", titre: "Reconnaissance vocale", run: () => (ears.loadError ? { etat: "erreur", detail: ears.loadError, conseil: "Vérifie la connexion (le modèle se télécharge au premier lancement)." } : { etat: ears.activeDevice ? "ok" : "attention", detail: `${ears.model} sur ${ears.activeDevice === "dml" ? "la carte graphique" : ears.activeDevice === "cpu" ? "le processeur" : "chargement…"}` }) },
-    { id: "voix", groupe: "Voix", titre: "Voix de Jarvis", run: () => ({ etat: voice.mode === "en ligne" ? "ok" : "attention", detail: voice.mode === "en ligne" ? "Voix neuronale en ligne." : `Voix de secours Windows (${voice.lastError ?? "voix en ligne injoignable"}).` }) },
+    { id: "voix", groupe: "Voix", titre: "Voix de Jarvis", run: () => {
+      if (env("VOIX_MOTEUR") === "locale") {
+        if (!localVoice.installed) return { etat: "attention", detail: "Voix locale choisie mais pas installée : Jarvis parle avec la voix en ligne.", action: { libelle: "Installer la voix locale", reglages: "voix" } };
+        return { etat: localVoice.status === "erreur" ? "erreur" : "ok", detail: `Voix locale ${localVoice.status === "prete" ? `prête (${localVoice.device === "cuda" ? "carte graphique" : "processeur"})` : localVoice.status === "erreur" ? `en erreur : ${localVoice.lastError ?? ""}` : "installée (démarre à la première phrase)"}.` };
+      }
+      return { etat: voice.mode === "en ligne" ? "ok" : "attention", detail: voice.mode === "en ligne" ? "Voix neuronale Microsoft en ligne." : `Voix de secours Windows (${voice.lastError ?? "voix en ligne injoignable"}).` };
+    } },
     { id: "empreinte", groupe: "Voix", titre: "Verrou vocal", run: () => (voiceLock.enrolled ? { etat: "ok", detail: `Ta voix est enregistrée (seuil ${voiceLock.threshold}).` } : { etat: "attention", detail: "Pas d'empreinte : n'importe quelle voix peut commander Jarvis.", conseil: "Dis « Jarvis, apprends ma voix » et répète les cinq phrases.", action: { libelle: "Apprendre ma voix", commande: "apprends ma voix" } }) },
     { id: "micro", groupe: "Sens", titre: "Micro et caméras", run: () => ({ etat: senses.micro ? "ok" : "erreur", detail: `Micro ${senses.micro ? "actif" : "indisponible"} · ${senses.cameras} webcam(s) · gestes ${senses.gestes ? "actifs" : "inactifs"} · détecteur de personne ${senses.detecteur ? "prêt" : "non chargé"}`, ...(senses.micro ? {} : { conseil: "Paramètres Windows → Confidentialité → Microphone : autorise les applications de bureau." }) }) },
     { id: "google", groupe: "Services", titre: "Gmail et Agenda", run: async () => (agenda ? await agenda.list(new Date(), new Date(Date.now() + 3_600_000)).then(() => ({ etat: "ok" as const, detail: "Connecté." }), (error: unknown) => ({ etat: "erreur" as const, detail: `Google refuse : ${error instanceof Error ? error.message : String(error)}`, conseil: "Reconnecte-toi depuis les Réglages (en mode test, Google coupe l'accès après 7 jours : publie l'application dans la console Google).", action: { libelle: "Reconnecter Google", reglages: "google" } })) : { etat: "absent" as const, detail: "Non configuré.", conseil: "Page Réglages → Gmail et Google Agenda.", action: { libelle: "Relier Google", reglages: "google" } }) },
@@ -1724,6 +1736,7 @@ const settings = new SettingsStore(envFile, vault);
 /** Ce qui change à chaud après un enregistrement. */
 function applySettings(keys: string[]): void {
   if (keys.includes("JARVIS_VILLE")) void weather.setCity(env("JARVIS_VILLE"));
+  if (keys.includes("VOIX_MOTEUR") && env("VOIX_MOTEUR") === "locale" && localVoice.installed) void localVoice.start();
   if (keys.includes("VOIX_SEUIL") && env("VOIX_SEUIL")) voiceLock.setThreshold(Number(env("VOIX_SEUIL")!.replace(",", ".")));
   if (keys.some((k) => k.startsWith("REVEIL") || k.startsWith("PLANNING"))) void wake?.refresh();
 }
@@ -1811,6 +1824,26 @@ async function runSettingAction(id: string): Promise<{ ok: boolean; message: str
         // Fenêtre de Claude Code : au premier lancement, il propose la connexion avec ton compte.
         spawn("cmd.exe", ["/c", "start", "Connexion à Claude", exe], { detached: true, stdio: "ignore", windowsHide: false }).unref();
         return { ok: true, message: "Une fenêtre noire s'ouvre : choisis un thème (Entrée), puis « Claude account with subscription », et valide dans le navigateur. Quand c'est fait, tape /exit dans la fenêtre, puis redémarre Jarvis." };
+      }
+      case "voix-locale-installer": {
+        if (localVoice.installed) return { ok: true, message: "La voix locale est déjà installée. Choisis « Voix locale » dans Moteur de voix, enregistre, puis « Écouter un essai »." };
+        host.notify("Voix locale", "Installation en cours : plusieurs Go à télécharger, 10 à 20 minutes. Je te préviens à la fin.");
+        void localVoice.install().then((msg) => {
+          host.notify("Voix locale", msg);
+          reply(msg);
+        });
+        return { ok: true, message: "Installation lancée en arrière-plan (10 à 20 minutes, plusieurs Go). Je te préviens quand c'est fini. Ensuite : Moteur de voix → « Voix locale », Enregistrer, puis « Écouter un essai »." };
+      }
+      case "voix-essai": {
+        const local = env("VOIX_MOTEUR") === "locale";
+        if (local && !localVoice.installed) return { ok: false, message: "La voix locale n'est pas encore installée : clique sur « Installer la voix locale »." };
+        const started = Date.now();
+        say("Bonjour Alex. Il fait huit degrés, ton premier rendez-vous est à neuf heures, et j'ai pris la liberté de lancer le café. Façon de parler.");
+        if (local) {
+          const ok = await localVoice.start();
+          return ok ? { ok: true, message: `Voix locale prête sur ${localVoice.device === "cuda" ? "la carte graphique" : "le processeur (lent)"} (${Math.round((Date.now() - started) / 1000)} s). Tu l'entends ?` } : { ok: false, message: `La voix locale ne démarre pas : ${localVoice.lastError ?? "erreur inconnue"}. Jarvis garde la voix en ligne en attendant.` };
+        }
+        return { ok: true, message: "Essai lancé avec la voix Microsoft en ligne." };
       }
       case "ollama": {
         const models = await localAI.models();
@@ -1988,6 +2021,7 @@ app.on("will-quit", () => {
   papers.stop();
   backups.stop();
   if (procedures.isRecording) procedures.stop();
+  localVoice.stop();
   void browser?.close();
 });
 

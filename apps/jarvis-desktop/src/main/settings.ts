@@ -125,13 +125,16 @@ export const SETTING_GROUPS: SettingGroup[] = [
     titre: "Voix et oreilles",
     description: "La voix de Jarvis, la reconnaissance vocale et le verrou vocal.",
     champs: [
-      { cle: "JARVIS_VOICE", libelle: "Voix", type: "choix", options: [{ valeur: "fr-FR-VivienneMultilingualNeural", libelle: "Vivienne (par défaut)" }, { valeur: "fr-FR-DeniseNeural", libelle: "Denise" }, { valeur: "fr-FR-EloiseNeural", libelle: "Éloïse" }], redemarrage: true },
+      { cle: "VOIX_MOTEUR", libelle: "Moteur de voix", type: "choix", options: [{ valeur: "en-ligne", libelle: "Microsoft en ligne (gratuit, par défaut)" }, { valeur: "locale", libelle: "Voix locale sur la carte graphique (plus humaine)" }] },
+      { cle: "VOIX_REFERENCE", libelle: "Voix locale : enregistrement de référence (10 à 20 s, WAV ou MP3)", type: "fichier", aide: "La voix locale imite le timbre de cet enregistrement : une voix française claire, sans musique. Vide : voix par défaut du modèle.", filtres: [{ name: "Audio", extensions: ["wav", "mp3", "flac"] }] },
+      { cle: "VOIX_EXPRESSIVITE", libelle: "Voix locale : expressivité (0,3 calme à 0,8 très expressive)", type: "nombre", exemple: "0.5" },
+      { cle: "JARVIS_VOICE", libelle: "Voix Microsoft", type: "choix", options: [{ valeur: "fr-FR-VivienneMultilingualNeural", libelle: "Vivienne (par défaut)" }, { valeur: "fr-FR-DeniseNeural", libelle: "Denise" }, { valeur: "fr-FR-EloiseNeural", libelle: "Éloïse" }], redemarrage: true },
       { cle: "JARVIS_VOICE_RATE", libelle: "Vitesse", type: "texte", exemple: "+5%", redemarrage: true },
       { cle: "STT_MODEL", libelle: "Reconnaissance vocale", type: "choix", options: [{ valeur: "auto", libelle: "Automatique (selon la carte graphique)" }, { valeur: "onnx-community/whisper-large-v3-turbo", libelle: "Large v3 turbo (précise)" }, { valeur: "onnx-community/whisper-small", libelle: "Small (équilibrée)" }, { valeur: "onnx-community/whisper-base", libelle: "Base (rapide)" }], redemarrage: true },
       { cle: "VOIX_SEUIL", libelle: "Sévérité du verrou vocal (0,80 à 0,92)", type: "nombre", exemple: "0.86" },
       { cle: "BOUTON_VOLANT_PARLER", libelle: "Bouton du volant pour parler (numéro)", type: "nombre" },
     ],
-    actions: [{ id: "voix", libelle: "Apprendre ma voix" }],
+    actions: [{ id: "voix-locale-installer", libelle: "Installer la voix locale" }, { id: "voix-essai", libelle: "Écouter un essai" }, { id: "voix", libelle: "Apprendre ma voix" }],
   },
   {
     id: "travail",

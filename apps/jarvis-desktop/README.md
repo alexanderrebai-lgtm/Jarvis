@@ -253,6 +253,16 @@ Jarvis ne calcule plus « de tête » : il exécute du Python sur ton PC (numpy,
 
 Il montre les graphiques et note chaque essai dans le **cahier d'expériences** du projet (`CAHIER.md`). Il faut Python : `winget install -e --id Python.Python.3.12`.
 
+## Voix locale, plus humaine
+
+Dans **Réglages → Voix et oreilles**, Jarvis peut parler avec **Chatterbox multilingue**, une voix libre (licence MIT) qui tourne sur ta carte graphique : plus naturelle et plus expressive que la voix Microsoft, et sans Internet.
+1. Il faut Python (`winget install -e --id Python.Python.3.12`).
+2. Clique sur **Installer la voix locale** : 10 à 20 minutes, plusieurs Go (PyTorch et le modèle). Jarvis te prévient à la fin.
+3. **Moteur de voix** → « Voix locale », **Enregistrer**, puis **Écouter un essai**. La première phrase prend une minute (chargement du modèle) ; ensuite, quelques dixièmes de seconde par phrase avec une carte NVIDIA.
+4. Facultatif : un **enregistrement de référence** de 10 à 20 secondes (voix française claire, sans musique) dont elle imite le timbre, et l'**expressivité** (0,3 calme, 0,8 très expressive).
+
+Si la voix locale ne répond pas, Jarvis reprend aussitôt la voix Microsoft.
+
 ## La veille
 
 Chaque matin avant le réveil, Jarvis lit les flux d'actualité sur l'actualité française, l'IA, Le Mans Ultimate et F1, la simulation et ton métier. Il en tire les grands titres du message du matin et un résumé (« quoi de neuf aujourd'hui ? »). Ajoute ou retire des sujets et des flux à la voix.

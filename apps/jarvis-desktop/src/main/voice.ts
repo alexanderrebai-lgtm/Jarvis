@@ -59,10 +59,13 @@ export class Voice {
   private readonly cache = new Map<string, { data: Buffer; mime: string }>();
   failures = 0;
   lastError: string | undefined;
+  /** Voix locale (carte graphique), essayée d'abord quand elle est choisie. */
+  local: { active: () => boolean; synthesize: (text: string) => Promise<Buffer | undefined> } | undefined;
 
   constructor(private readonly voiceName = DEFAULT_VOICE, private readonly rate = "+0%", private readonly pitch = "+0Hz") {}
 
-  get mode(): "en ligne" | "secours Windows" {
+  get mode(): "locale" | "en ligne" | "secours Windows" {
+    if (this.local?.active()) return "locale";
     return Date.now() < this.offlineUntil ? "secours Windows" : "en ligne";
   }
 
@@ -73,6 +76,10 @@ export class Voice {
     const cached = this.cache.get(clean);
     if (cached) return cached;
     let audio: { data: Buffer; mime: string } | undefined;
+    if (this.local?.active()) {
+      const wav = await this.local.synthesize(clean).catch(() => undefined);
+      if (wav) return { data: wav, mime: "audio/wav" };
+    }
     if (Date.now() >= this.offlineUntil) {
       try {
         audio = { data: await this.edge(clean), mime: "audio/mpeg" };
