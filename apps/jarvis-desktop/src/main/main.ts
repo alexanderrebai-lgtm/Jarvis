@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, protocol, safeStorage, screen, shell, Tray } from "electron";
+import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, Notification, powerSaveBlocker, protocol, safeStorage, screen, shell, Tray } from "electron";
 import ffmpegPath from "ffmpeg-static";
 import { unzipSync } from "fflate";
 import { WebBrowser } from "@muscu/jarvis/src/browser.js";
@@ -66,6 +66,7 @@ import { BackgroundTasks } from "./tasks.js";
 import { explainGoogle, findTelegramChat, googleSignIn, parseEnv, SettingsStore, updateEnvText } from "./settings.js";
 import { openSecrets, sealSecrets, mergeEnvText } from "./secret-backup.js";
 import { describeLost, Watchdog } from "./watchdog.js";
+import { resilientFetch } from "./net-fetch.js";
 import { dpapiCipher, isLegacyVault, migrateEnvSecrets, migrateLegacyVault, Vault } from "./vault.js";
 import { Veille } from "./veille.js";
 import { Ears, isInterruption, pickSpeechModel, SentenceSplitter, Voice, DEFAULT_VOICE } from "./voice.js";
@@ -670,6 +671,7 @@ const spotify = new SpotifyClient({
   },
   load: () => (vault.available ? vault.getJson<SpotifyTokens>("spotify") : spotifyState.read().jetons),
   save: (tokens) => (vault.available ? vault.setJson("spotify", tokens) : spotifyState.update((s) => ({ ...s, jetons: tokens }))),
+  fetchFn: resilientFetch(fetch, () => (app.isReady() ? (net.fetch as unknown as typeof fetch) : undefined), "Spotify"),
 });
 let spotifyDevice: string | undefined;
 
@@ -768,13 +770,18 @@ const spotifyHelpers: PlusHost["spotify"] = {
 
 let nowPlaying: NowPlaying & { relie: boolean; erreur?: string } = { actif: false, relie: false };
 
+let musicFailures = 0;
 async function refreshMusic(): Promise<typeof nowPlaying> {
   if (!spotify.connected) nowPlaying = { actif: false, relie: false };
   else {
     try {
       nowPlaying = { ...(await spotify.nowPlaying()), relie: true };
+      musicFailures = 0;
     } catch (error) {
-      nowPlaying = { actif: false, relie: true, erreur: error instanceof Error ? error.message : String(error) };
+      // Un raté réseau passager ne vide pas le module : on garde le dernier titre et on ne prévient qu'après trois échecs.
+      musicFailures += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      if (musicFailures >= 3 || !nowPlaying.relie) nowPlaying = { actif: false, relie: true, erreur: message };
     }
   }
   pages.broadcast("musique:etat", nowPlaying, "accueil");
