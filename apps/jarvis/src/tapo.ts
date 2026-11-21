@@ -1,6 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { cloudLogin, loginDevice, loginDeviceByIp, type TapoDevice } from "tp-link-tapo-connect";
+import { createSocket } from "node:dgram";
+import { networkInterfaces } from "node:os";
+import { cloudLogin, loginDeviceByIp, type TapoDevice } from "tp-link-tapo-connect";
+import { resolveMacToIp } from "tp-link-tapo-connect/dist/network-tools.js";
 
 /**
  * Ampoules et prises TP-Link Tapo, pilotées directement sur le Wi-Fi de la maison
@@ -85,10 +88,55 @@ export function realTapoDriver(email: string, password: string, manual: TapoEntr
         .map((d) => ({ nom: decodeAlias(d.alias), type: kindOf(d.deviceType, d.deviceModel), modele: d.deviceModel, cloud: d }));
     },
     connect: async (entry) => {
-      const device = entry.ip ? await loginDeviceByIp(email, password, entry.ip) : await loginDevice(email, password, entry.cloud!);
+      // Adresse déjà connue : on l'essaie d'abord (elle peut avoir changé si la box en a donné une autre).
+      if (entry.ip) {
+        try {
+          return (await loginDeviceByIp(email, password, entry.ip)) as unknown as TapoConnection;
+        } catch (error) {
+          if (!entry.cloud) throw error;
+        }
+      }
+      const mac = entry.cloud!.deviceMac;
+      let ip = await resolveMacToIp(mac).catch(() => undefined);
+      if (!ip) {
+        // Le PC ne connaît l'adresse d'un appareil qu'après lui avoir parlé : on « réveille » le réseau local, puis on recherche.
+        await warmLocalNetwork();
+        ip = await resolveMacToIp(mac).catch(() => undefined);
+      }
+      if (!ip) throw new Error(`introuvable sur le réseau local (adresse MAC ${mac}). Vérifie qu'il est alimenté (interrupteur allumé) et sur la même box que le PC, ou indique son adresse IP dans « Appareils »`);
+      const device = await loginDeviceByIp(email, password, ip);
+      entry.ip = ip;
       return device as unknown as TapoConnection;
     },
   };
+}
+
+let lastWarm = 0;
+/**
+ * Envoie un petit paquet à chaque adresse du réseau local (/24) : Windows note
+ * alors l'adresse matérielle de chaque appareil qui répond, ce qui permet de
+ * retrouver une ampoule par son adresse MAC. Au plus une fois par minute.
+ */
+export async function warmLocalNetwork(waitMs = 2_000): Promise<void> {
+  if (Date.now() - lastWarm < 60_000) return;
+  lastWarm = Date.now();
+  const prefixes = new Set<string>();
+  for (const list of Object.values(networkInterfaces())) {
+    for (const net of list ?? []) {
+      if (net.family !== "IPv4" || net.internal) continue;
+      if (!/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(net.address)) continue;
+      prefixes.add(net.address.split(".").slice(0, 3).join("."));
+    }
+  }
+  if (!prefixes.size) return;
+  const socket = createSocket("udp4");
+  socket.on("error", () => undefined);
+  const payload = Buffer.from([0]);
+  for (const prefix of prefixes) {
+    for (let host = 1; host < 255; host++) socket.send(payload, 20002, `${prefix}.${host}`, () => undefined);
+  }
+  await new Promise((r) => setTimeout(r, waitMs));
+  socket.close();
 }
 
 function normalize(text: string): string {
@@ -220,8 +268,11 @@ export class TapoHome {
   private async connection(entry: TapoEntry): Promise<TapoConnection> {
     const cached = this.connections.get(entry.nom);
     if (cached) return cached;
+    const before = entry.ip;
     const created = await this.driver.connect(entry);
     this.connections.set(entry.nom, created);
+    // Adresse IP apprise : gardée pour la prochaine fois (connexion directe, plus rapide).
+    if (entry.ip !== before) this.saveCache();
     return created;
   }
 

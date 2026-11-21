@@ -1883,9 +1883,12 @@ async function runSettingAction(id: string): Promise<{ ok: boolean; message: str
         const states = await test.states();
         if (!states.length) return { ok: false, message: "Connexion faite, mais aucun appareil trouvé. Vérifie que le PC est sur le même réseau que tes ampoules, ou liste-les avec leur adresse IP." };
         const down = states.filter((d) => d.allume === null);
-        const hint = down.length
-          ? " Injoignables en direct depuis le PC : dans l'appli Tapo, va dans Moi → Tapo Lab → « Compatibilité tierce » (Third-Party Compatibility) et active-la, puis réessaie. Vérifie aussi que le PC et les ampoules sont sur la même box (pas le Wi-Fi invité). Détail : " + down.map((d) => `${d.nom} : ${(d as { erreur?: string }).erreur ?? "pas de réponse"}`).join(" ; ")
-          : "";
+        const notFound = down.filter((d) => /introuvable sur le réseau|not found/i.test((d as { erreur?: string }).erreur ?? ""));
+        const hint = !down.length
+          ? ""
+          : notFound.length === down.length
+            ? ` ${down.map((d) => d.nom).join(", ")} : pas trouvé${down.length > 1 ? "s" : ""} sur le réseau de la maison. Vérifie qu'ils sont alimentés (interrupteur allumé), puis réessaie dans une minute. Si ça persiste, indique leur adresse IP dans « Appareils » (appli Tapo → appareil → roue dentée → Infos de l'appareil).`
+            : " Injoignables en direct depuis le PC : dans l'appli Tapo, va dans Moi → Tapo Lab → « Compatibilité tierce » (Third-Party Compatibility) et active-la, puis réessaie. Vérifie aussi que le PC et les ampoules sont sur la même box (pas le Wi-Fi invité). Détail : " + down.map((d) => `${d.nom} : ${(d as { erreur?: string }).erreur ?? "pas de réponse"}`).join(" ; ");
         return { ok: down.length === 0, message: `${states.length} appareil(s) : ${states.map((d) => `${d.nom}${d.allume === null ? " (injoignable)" : d.allume ? " (allumé)" : " (éteint)"}`).join(", ")}.${hint}`, redemarrage: !tapo };
       }
       case "google": {

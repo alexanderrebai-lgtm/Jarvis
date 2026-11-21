@@ -158,3 +158,26 @@ describe("compte TP-Link ménagé", async () => {
     expect(explainTapoError(new Error("-20601"))).toMatch(/mot de passe/);
   });
 });
+
+describe("adresse des ampoules", async () => {
+  const { mkdtempSync, readFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const { TapoHome, warmLocalNetwork } = await import("../src/tapo.js");
+  const conn = { turnOn: async () => {}, turnOff: async () => {}, setBrightness: async () => {}, setColour: async () => {}, getDeviceInfo: async () => ({ device_on: true }), getEnergyUsage: async () => ({}) };
+
+  it("garde l'adresse IP trouvée pour la prochaine fois", async () => {
+    const cacheFile = path.join(mkdtempSync(path.join(tmpdir(), "tapo-")), "tapo.json");
+    const driver = {
+      discover: async () => [{ nom: "Cuisine", type: "ampoule" as const, modele: "L530" }],
+      connect: async (entry: { ip?: string }) => ((entry.ip = "192.168.1.42"), conn),
+    };
+    const home = new TapoHome(driver, { cacheFile, cacheKey: "a@b.fr" });
+    await home.states();
+    expect(JSON.parse(readFileSync(cacheFile, "utf8")).appareils[0].ip).toBe("192.168.1.42");
+  });
+
+  it("réveille le réseau local sans erreur", async () => {
+    await expect(warmLocalNetwork(10)).resolves.toBeUndefined();
+  });
+});
