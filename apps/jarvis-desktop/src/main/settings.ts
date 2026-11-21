@@ -62,7 +62,7 @@ export const SETTING_GROUPS: SettingGroup[] = [
     titre: "Gmail et Google Agenda",
     description: "Pour que Jarvis lise tes mails et ton agenda. Il faut une fois créer un « identifiant » Google (5 minutes), puis cliquer sur « Se connecter avec Google ».",
     guide:
-      "1. Va sur console.cloud.google.com, crée un projet « Jarvis ».\n2. Menu → API et services → Bibliothèque : active « Gmail API » et « Google Calendar API ».\n3. Écran de consentement OAuth : type Externe, ajoute ton adresse comme utilisateur test.\n4. Identifiants → Créer → ID client OAuth → type « Application de bureau ».\n5. Copie l'ID client et le code secret ci-dessous, enregistre, puis clique sur « Se connecter avec Google ».",
+      "1. Va sur console.cloud.google.com, crée un projet « Jarvis ».\n2. Menu → API et services → Bibliothèque : active « Gmail API » et « Google Calendar API ».\n3. Écran de consentement OAuth (Google Auth Platform) : type Externe, ajoute ton adresse comme utilisateur test.\n4. Identifiants → Créer → ID client OAuth → type « Application de bureau ».\n5. Copie l'ID client et le code secret ci-dessous, enregistre, puis clique sur « Se connecter avec Google ».\n6. IMPORTANT : Google Auth Platform → Audience → « Publier l'application » (En production). En mode « Test », Google coupe l'accès tous les 7 jours. Après la publication, clique encore une fois sur « Se connecter avec Google » : Google affiche « Google n'a pas validé cette application » → « Paramètres avancés » → « Accéder à Jarvis (non sécurisé) ». C'est normal pour une appli personnelle.",
     champs: [
       { cle: "GOOGLE_CLIENT_ID", libelle: "ID client OAuth", type: "texte", redemarrage: true },
       { cle: "GOOGLE_CLIENT_SECRET", libelle: "Code secret du client", type: "secret", redemarrage: true },
@@ -163,9 +163,10 @@ export const SETTING_GROUPS: SettingGroup[] = [
     description: "Une sauvegarde est faite chaque nuit dans Documents\\Jarvis\\sauvegardes ; tu peux en envoyer une copie ailleurs.",
     champs: [
       { cle: "SAUVEGARDE_COPIE", libelle: "Copie des sauvegardes (OneDrive, disque externe)", type: "dossier" },
+      { cle: "SAUVEGARDE_MOT_DE_PASSE", libelle: "Mot de passe de sauvegarde (8 caractères ou plus)", type: "secret", aide: "Chiffre une copie de tes mots de passe et connexions, restaurable sur un autre PC ou après une réinstallation de Windows. Note-le sur papier : sans lui, la copie est illisible." },
       { cle: "MISE_A_JOUR_URL", libelle: "Adresse de mise à jour (vide : dépôt GitHub de Jarvis)", type: "texte", redemarrage: true },
     ],
-    actions: [{ id: "sauvegarde", libelle: "Sauvegarder maintenant" }, { id: "mise-a-jour", libelle: "Chercher une mise à jour" }],
+    actions: [{ id: "sauvegarde", libelle: "Sauvegarder maintenant" }, { id: "restaurer-coffre", libelle: "Restaurer mes mots de passe…" }, { id: "mise-a-jour", libelle: "Chercher une mise à jour" }],
   },
 ];
 
@@ -256,6 +257,14 @@ export class SettingsStore {
 }
 
 export const GOOGLE_REDIRECT_PORT = 8899;
+
+/** Erreurs Google expliquées : l'expiration du mode « Test » est la plus fréquente. */
+export function explainGoogle(message: string): string {
+  if (/invalid_grant|expired|revoked/i.test(message)) return "L'autorisation Google a expiré ou a été retirée. Si ton appli Google est en mode « Test », Google la coupe tous les 7 jours : publie-la (Réglages → Gmail et Google Agenda → Comment faire, étape 6), puis « Se connecter avec Google ».";
+  if (/invalid_client|unauthorized_client/i.test(message)) return "Google ne reconnaît pas l'ID client ou le code secret : recopie-les depuis la console Google.";
+  if (/ENOTFOUND|ETIMEDOUT|ECONNRESET|fetch failed/i.test(message)) return "Google ne répond pas : vérifie la connexion Internet.";
+  return `Google refuse : ${message}`;
+}
 
 /** Connexion Google pour une « application de bureau » : page Google dans le navigateur, retour sur 127.0.0.1. */
 export async function googleSignIn(options: { clientId: string; clientSecret: string; scopes: string[]; open: (url: string) => void; fetchFn?: typeof fetch; timeoutMs?: number }): Promise<{ refreshToken: string; email?: string }> {

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, protocol, safeStorage, screen, shell, Tray } from "electron";
@@ -63,7 +63,9 @@ import { Routines, runRoutine, Timers, type RoutineStep } from "./routines.js";
 import { parseCameras, rtspUrl, SecurityService, type SurveillanceMode } from "./security.js";
 import { elmScript, findElmScript, serialMonitorScript } from "./serial.js";
 import { BackgroundTasks } from "./tasks.js";
-import { findTelegramChat, googleSignIn, SettingsStore } from "./settings.js";
+import { explainGoogle, findTelegramChat, googleSignIn, parseEnv, SettingsStore, updateEnvText } from "./settings.js";
+import { openSecrets, sealSecrets, mergeEnvText } from "./secret-backup.js";
+import { describeLost, Watchdog } from "./watchdog.js";
 import { dpapiCipher, isLegacyVault, migrateEnvSecrets, migrateLegacyVault, Vault } from "./vault.js";
 import { Veille } from "./veille.js";
 import { Ears, isInterruption, pickSpeechModel, SentenceSplitter, Voice, DEFAULT_VOICE } from "./voice.js";
@@ -82,8 +84,15 @@ function reportCrash(error: unknown): void {
     // rien à faire de plus
   }
   console.error(text);
+  if (startupTest) {
+    console.error("[test] ÉCHEC : erreur au démarrage");
+    app.exit(1);
+    return;
+  }
   if (app.isReady()) dialog.showErrorBox("Jarvis a rencontré un problème", text.slice(0, 1500));
 }
+/** Test de démarrage (GitHub, avant chaque publication) : Jarvis démarre, charge l'accueil, puis se ferme. */
+const startupTest = process.env.JARVIS_TEST_DEMARRAGE === "1";
 process.on("uncaughtException", reportCrash);
 process.on("unhandledRejection", reportCrash);
 
@@ -1042,8 +1051,44 @@ const backups = new BackupService({
   ],
   destination: path.join(workspace, "sauvegardes"),
   copie: env("SAUVEGARDE_COPIE"),
-  onDone: (result) => actions.add({ outil: "sauvegarde", resume: `${result.fichiers} fichiers → ${result.fichier}`, autorise: true, origine: "automatique" }),
+  onDone: (result) => {
+    actions.add({ outil: "sauvegarde", resume: `${result.fichiers} fichiers → ${result.fichier}`, autorise: true, origine: "automatique" });
+    try {
+      saveSecretCopy();
+    } catch (error) {
+      console.warn("[coffre portable]", error);
+    }
+  },
 });
+
+const SECRET_COPY = "jarvis-coffre.chiffre";
+/** Copie des mots de passe chiffrée par le mot de passe de sauvegarde (restaurable sur un autre PC). */
+function saveSecretCopy(): string | undefined {
+  const password = env("SAUVEGARDE_MOT_DE_PASSE");
+  if (!password || !vault.available) return undefined;
+  const coffre: Record<string, string> = {};
+  for (const key of vault.keys()) {
+    const value = vault.get(key);
+    if (value !== undefined && key !== "SAUVEGARDE_MOT_DE_PASSE") coffre[key] = value;
+  }
+  const sealed = sealSecrets({ version: 1, date: new Date().toISOString(), coffre, reglages: readFileSync(envFile, "utf8") }, password);
+  const targets = [path.join(workspace, "sauvegardes"), env("SAUVEGARDE_COPIE")].filter((d): d is string => Boolean(d));
+  for (const dir of targets) {
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, SECRET_COPY), sealed);
+    } catch (error) {
+      console.warn("[coffre portable]", dir, error);
+    }
+  }
+  return path.join(targets[0]!, SECRET_COPY);
+}
+
+function secretCopyDate(): string | undefined {
+  const file = path.join(workspace, "sauvegardes", SECRET_COPY);
+  if (!existsSync(file)) return undefined;
+  return statSync(file).mtime.toLocaleDateString("fr-FR");
+}
 
 // ---------- Hôte des outils supplémentaires ----------
 
@@ -1117,6 +1162,23 @@ plusHostRef.current = {
   },
 };
 
+// ---------- Veilleur des connexions ----------
+
+const watchdog = new Watchdog({
+  run: () => runDiagnostic(),
+  watched: ["claude", "google", "spotify", "tapo", "cameras", "sauvegardes", "voix", "micro", "disque"],
+  onLost: (lost) => {
+    const text = describeLost(lost);
+    host.notify(lost.length > 1 ? "Des éléments ont décroché" : `${lost[0]!.titre} a décroché`, text);
+    actions.add({ outil: "veilleur", resume: `Décroché : ${lost.map((r) => r.titre).join(", ")}`, autorise: true, origine: "automatique" });
+    if (phone.enabled) void phone.text(`Jarvis : ${lost.length > 1 ? "des éléments ont décroché" : "un élément a décroché"}.\n${text}\nDétails : page Diagnostic.`).catch(() => undefined);
+  },
+  onBack: (back) => {
+    host.notify("De nouveau connecté", back.map((r) => r.titre).join(", "));
+    actions.add({ outil: "veilleur", resume: `Revenu : ${back.map((r) => r.titre).join(", ")}`, autorise: true, origine: "automatique" });
+  },
+});
+
 // ---------- Diagnostic ----------
 
 let lastDiagnostic: Awaited<ReturnType<typeof runChecks>> | undefined;
@@ -1142,7 +1204,7 @@ async function runDiagnostic() {
     } },
     { id: "empreinte", groupe: "Voix", titre: "Verrou vocal", run: () => (voiceLock.enrolled ? { etat: "ok", detail: `Ta voix est enregistrée (seuil ${voiceLock.threshold}).` } : { etat: "attention", detail: "Pas d'empreinte : n'importe quelle voix peut commander Jarvis.", conseil: "Dis « Jarvis, apprends ma voix » et répète les cinq phrases.", action: { libelle: "Apprendre ma voix", commande: "apprends ma voix" } }) },
     { id: "micro", groupe: "Sens", titre: "Micro et caméras", run: () => ({ etat: senses.micro ? "ok" : "erreur", detail: `Micro ${senses.micro ? "actif" : "indisponible"} · ${senses.cameras} webcam(s) · gestes ${senses.gestes ? "actifs" : "inactifs"} · détecteur de personne ${senses.detecteur ? "prêt" : "non chargé"}`, ...(senses.micro ? {} : { conseil: "Paramètres Windows → Confidentialité → Microphone : autorise les applications de bureau." }) }) },
-    { id: "google", groupe: "Services", titre: "Gmail et Agenda", run: async () => (agenda ? await agenda.list(new Date(), new Date(Date.now() + 3_600_000)).then(() => ({ etat: "ok" as const, detail: "Connecté." }), (error: unknown) => ({ etat: "erreur" as const, detail: `Google refuse : ${error instanceof Error ? error.message : String(error)}`, conseil: "Reconnecte-toi depuis les Réglages (en mode test, Google coupe l'accès après 7 jours : publie l'application dans la console Google).", action: { libelle: "Reconnecter Google", reglages: "google" } })) : { etat: "absent" as const, detail: "Non configuré.", conseil: "Page Réglages → Gmail et Google Agenda.", action: { libelle: "Relier Google", reglages: "google" } }) },
+    { id: "google", groupe: "Services", titre: "Gmail et Agenda", run: async () => (agenda ? await agenda.list(new Date(), new Date(Date.now() + 3_600_000)).then(() => ({ etat: "ok" as const, detail: "Connecté." }), (error: unknown) => ({ etat: "erreur" as const, detail: explainGoogle(error instanceof Error ? error.message : String(error)), conseil: "Réglages → Gmail et Google Agenda → « Se connecter avec Google ».", action: { libelle: "Reconnecter Google", reglages: "google" } })) : { etat: "absent" as const, detail: "Non configuré.", conseil: "Page Réglages → Gmail et Google Agenda.", action: { libelle: "Relier Google", reglages: "google" } }) },
     { id: "tapo", groupe: "Maison", titre: "Ampoules et prises Tapo", run: async () => {
       if (!tapo) return { etat: "absent", detail: "Non configuré.", action: { libelle: "Relier Tapo", reglages: "tapo" } };
       const states = await tapo.states();
@@ -1169,6 +1231,11 @@ async function runDiagnostic() {
       return next ? { etat: "ok", detail: `${next.date} à ${next.heure} — ${next.raison}.` } : { etat: "attention", detail: "Aucun réveil dans les 8 jours." };
     } },
     { id: "sauvegardes", groupe: "Sécurité des données", titre: "Sauvegardes", run: () => (backups.last?.erreur ? { etat: "erreur", detail: backups.last.erreur } : backups.last ? { etat: "ok", detail: `Dernière : ${backups.last.date}.` } : { etat: "attention", detail: "Pas encore de sauvegarde (la première se fait cette nuit).", action: { libelle: "Sauvegarder maintenant", commande: "lance une sauvegarde" } }) },
+    { id: "coffre-portable", groupe: "Sécurité des données", titre: "Copie des mots de passe", run: () => {
+      if (!env("SAUVEGARDE_MOT_DE_PASSE")) return { etat: "attention", detail: "Pas de mot de passe de sauvegarde : après une réinstallation de Windows, il faudrait tout reconnecter.", action: { libelle: "Choisir un mot de passe", reglages: "sauvegardes" } };
+      const date = secretCopyDate();
+      return date ? { etat: "ok", detail: `Copie chiffrée du ${date} (avec chaque sauvegarde).` } : { etat: "attention", detail: "Mot de passe choisi, copie pas encore faite.", action: { libelle: "Sauvegarder maintenant", reglages: "sauvegardes" } };
+    } },
     { id: "coffre", groupe: "Sécurité des données", titre: "Coffre-fort des mots de passe", run: () => (vault.available ? { etat: "ok", detail: `${vault.keys().length} secret(s) chiffré(s) par Windows${movedSecrets.length ? ` (déplacés de jarvis.env : ${movedSecrets.join(", ")})` : ""}.` } : { etat: "attention", detail: "Chiffrement indisponible : les mots de passe restent dans jarvis.env." }) },
     { id: "labo", groupe: "Recherche", titre: "Labo de calcul (Python)", run: async () => (lab.ready ? { etat: "ok", detail: "Environnement prêt." } : (await lab.findPython()) ? { etat: "attention", detail: "Python trouvé, labo pas encore préparé.", action: { libelle: "Préparer le labo", commande: "prépare le labo de calcul" } } : { etat: "absent", detail: "Python absent.", conseil: "winget install -e --id Python.Python.3.12" }) },
     { id: "bibliotheque", groupe: "Recherche", titre: "Bibliothèque", run: () => ({ etat: "ok", detail: `${library.status().documents} document(s), ${library.status().passages} passages${library.status().semantique ? ", recherche par le sens active" : ""}. Dossier : ${library.status().dossier}` }) },
@@ -1854,7 +1921,22 @@ async function runSettingAction(id: string): Promise<{ ok: boolean; message: str
       }
       case "sauvegarde": {
         const r = await backups.run();
-        return { ok: true, message: r ? `Sauvegarde faite : ${r.fichiers} fichiers dans ${r.fichier}.` : "Une sauvegarde est déjà en cours." };
+        if (!r) return { ok: true, message: "Une sauvegarde est déjà en cours." };
+        const copy = env("SAUVEGARDE_MOT_DE_PASSE") ? " Tes mots de passe sont copiés, chiffrés, à côté." : " Ajoute un mot de passe de sauvegarde pour copier aussi tes mots de passe et connexions.";
+        return { ok: true, message: `Sauvegarde faite : ${r.fichiers} fichiers dans ${r.fichier}.${copy}` };
+      }
+      case "restaurer-coffre": {
+        const password = env("SAUVEGARDE_MOT_DE_PASSE");
+        if (!password) return { ok: false, message: "Tape d'abord le mot de passe de sauvegarde (le même qu'avant), enregistre, puis recommence." };
+        if (!vault.available) return { ok: false, message: "Le chiffrement de Windows n'est pas disponible : restauration impossible." };
+        const chosen = await dialog.showOpenDialog({ title: "Fichier jarvis-coffre.chiffre", defaultPath: path.join(workspace, "sauvegardes"), filters: [{ name: "Copie des mots de passe", extensions: ["chiffre"] }], properties: ["openFile"] });
+        const file = chosen.filePaths[0];
+        if (chosen.canceled || !file) return { ok: false, message: "Aucun fichier choisi." };
+        const bundle = openSecrets(readFileSync(file), password);
+        for (const [key, value] of Object.entries(bundle.coffre)) vault.set(key, value);
+        const changes = mergeEnvText(parseEnv(readFileSync(envFile, "utf8")), parseEnv(bundle.reglages));
+        writeFileSync(envFile, updateEnvText(readFileSync(envFile, "utf8"), changes));
+        return { ok: true, message: `Restauré : ${Object.keys(bundle.coffre).length} mot(s) de passe et connexions du ${new Date(bundle.date).toLocaleDateString("fr-FR")}. Redémarre Jarvis pour les utiliser.`, redemarrage: true };
       }
       case "mise-a-jour":
         return { ok: true, message: await checkUpdates() };
@@ -1920,6 +2002,30 @@ void app.whenReady().then(async () => {
   });
 
   const homeWindow = pages.openPage("accueil", undefined, { show: !process.argv.includes("--hidden") });
+  if (startupTest) {
+    const fail = (why: string) => {
+      console.error(`[test] ÉCHEC : ${why}`);
+      app.exit(1);
+    };
+    setTimeout(() => fail("l'accueil ne s'est pas chargé en 2 minutes"), 120_000).unref();
+    homeWindow.webContents.on("render-process-gone", (_e, d) => fail(`page d'accueil plantée (${d.reason})`));
+    homeWindow.webContents.on("preload-error", (_e, _p, error) => fail(`préchargement : ${error.message}`));
+    homeWindow.webContents.on("console-message", (event) => {
+      if (event.level === "error" && /Uncaught|is not defined|is not a function|Cannot read/i.test(event.message)) fail(`erreur dans l'accueil : ${event.message}`);
+    });
+    homeWindow.webContents.once("did-finish-load", () => {
+      // Laisse tourner Jarvis 20 secondes (services, pages) avant de conclure.
+      setTimeout(async () => {
+        const diag = await runDiagnostic().catch((error) => fail(`diagnostic : ${error instanceof Error ? error.message : error}`));
+        if (!diag) return;
+        const ok = `[test] démarrage OK — version ${app.getVersion()}, ${diag.length} contrôles du diagnostic exécutés`;
+        console.log(ok);
+        writeFileSync(path.join(workspace, "test-demarrage.txt"), ok);
+        quitting = true;
+        app.exit(0);
+      }, 20_000);
+    });
+  }
   // Le micro et les caméras sont autorisés pour l'interface de Jarvis, et seulement elle.
   homeWindow.webContents.session.setPermissionRequestHandler((contents, permission, callback) => {
     callback(contents.getURL().startsWith("file://") && ["media", "notifications", "clipboard-sanitized-write"].includes(permission));
@@ -1980,6 +2086,7 @@ void app.whenReady().then(async () => {
   veille.start();
   papers.start();
   backups.start();
+  if (!startupTest) watchdog.start();
   // Un souci de mise à jour ne doit jamais empêcher Jarvis de démarrer.
   void setupUpdates().catch((error) => {
     updateStatus = `Impossible de vérifier : ${error instanceof Error ? error.message : String(error)}`;
@@ -2013,6 +2120,7 @@ void app.whenReady().then(async () => {
 });
 
 app.on("will-quit", () => {
+  watchdog.stop();
   globalShortcut.unregisterAll();
   race.stop();
   security.stop();

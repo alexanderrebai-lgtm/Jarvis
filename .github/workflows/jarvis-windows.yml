@@ -36,6 +36,27 @@ jobs:
         run: node build.mjs && npx electron-builder --win nsis --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Test de démarrage (rien n'est publié si Jarvis ne démarre pas)
+        shell: pwsh
+        working-directory: apps/jarvis-desktop
+        run: |
+          $env:JARVIS_TEST_DEMARRAGE = "1"
+          $env:JARVIS_WORKSPACE = Join-Path $env:RUNNER_TEMP "jarvis-test"
+          $out = Join-Path $env:RUNNER_TEMP "demarrage.log"
+          $err = Join-Path $env:RUNNER_TEMP "demarrage-erreurs.log"
+          $p = Start-Process -FilePath "release/win-unpacked/Jarvis.exe" -ArgumentList "--hidden" -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+          $null = $p.Handle
+          if (-not $p.WaitForExit(180000)) {
+            Stop-Process -Id $p.Id -Force
+            Get-Content $out, $err -ErrorAction SilentlyContinue | Select-Object -Last 60
+            Write-Error "Jarvis ne s'est pas fermé en 3 minutes (bloqué au démarrage)."
+            exit 1
+          }
+          Get-Content $out, $err -ErrorAction SilentlyContinue | Select-String "\[test\]|Error|ÉCHEC" | Select-Object -Last 40
+          if ($p.ExitCode -ne 0) { Write-Error "Le test de démarrage a échoué (code $($p.ExitCode))."; exit 1 }
+          $marker = Join-Path $env:JARVIS_WORKSPACE "test-demarrage.txt"
+          if (-not (Test-Path $marker)) { Write-Error "Jarvis n'a pas confirmé son démarrage."; exit 1 }
+          Get-Content $marker
       - uses: actions/upload-artifact@v4
         with:
           name: Jarvis-installation

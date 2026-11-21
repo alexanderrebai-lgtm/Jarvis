@@ -253,6 +253,13 @@ Jarvis ne calcule plus « de tête » : il exécute du Python sur ton PC (numpy,
 
 Il montre les graphiques et note chaque essai dans le **cahier d'expériences** du projet (`CAHIER.md`). Il faut Python : `winget install -e --id Python.Python.3.12`.
 
+## Connexions surveillées et copie des mots de passe
+
+- **Veilleur** : toutes les 15 minutes, Jarvis vérifie Claude, Google, Spotify, Tapo, les caméras, la voix, le micro, le disque et les sauvegardes. Si l'un d'eux décroche (deux contrôles de suite), il te prévient une fois (notification et Telegram), puis encore quand c'est revenu.
+- **Google** : publie ton appli Google (« En production »), sinon Google coupe l'accès tous les 7 jours. Le guide est dans Réglages → Gmail et Google Agenda → Comment faire, étape 6.
+- **Copie des mots de passe** : le coffre-fort est lié à ta session Windows. Choisis un **mot de passe de sauvegarde** (Réglages → Sauvegardes) : à chaque sauvegarde, Jarvis écrit `jarvis-coffre.chiffre`, lisible seulement avec ce mot de passe. Après une réinstallation : réinstalle Jarvis, tape le même mot de passe, enregistre, puis « Restaurer mes mots de passe… ».
+- **Test de démarrage** : avant chaque publication, GitHub lance Jarvis sous Windows ; s'il ne démarre pas, la mise à jour n'est pas publiée.
+
 ## Voix locale, plus humaine
 
 Dans **Réglages → Voix et oreilles**, Jarvis peut parler avec **Chatterbox multilingue**, une voix libre (licence MIT) qui tourne sur ta carte graphique : plus naturelle et plus expressive que la voix Microsoft, et sans Internet.
