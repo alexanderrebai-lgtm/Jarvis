@@ -260,6 +260,12 @@ Il montre les graphiques et note chaque essai dans le **cahier d'expériences** 
 - **Copie des mots de passe** : le coffre-fort est lié à ta session Windows. Choisis un **mot de passe de sauvegarde** (Réglages → Sauvegardes) : à chaque sauvegarde, Jarvis écrit `jarvis-coffre.chiffre`, lisible seulement avec ce mot de passe. Après une réinstallation : réinstalle Jarvis, tape le même mot de passe, enregistre, puis « Restaurer mes mots de passe… ».
 - **Test de démarrage** : avant chaque publication, GitHub lance Jarvis sous Windows ; s'il ne démarre pas, la mise à jour n'est pas publiée.
 
+## Mot d'éveil, mode absent et journal
+
+- **Son nom** : Jarvis n'agit que si une phrase contient « Jarvis » (ou juste après une réponse). Ce qui ne lui est pas adressé n'est ni affiché ni gardé. Réglages → Voix et oreilles : autres noms, durée d'écoute de la suite (0 = toujours dire son nom), petit son quand il t'entend.
+- **Mode absent** : « Jarvis, je pars » (ou « je sors », « mode absent ») coupe la musique, éteint les lumières, ferme les pages, laisse une minute pour sortir, active la surveillance complète et t'envoie un message Telegram. « Jarvis, je suis rentré » coupe la surveillance, allume le salon et résume ce qui s'est passé depuis ton départ.
+- **Page Journal** : tout ce que Jarvis a fait, jour par jour, avec des filtres (mes demandes, automatique, alertes, refusé) et les dernières erreurs.
+
 ## Voix locale, plus humaine
 
 Dans **Réglages → Voix et oreilles**, Jarvis peut parler avec **Chatterbox multilingue**, une voix libre (licence MIT) qui tourne sur ta carte graphique : plus naturelle et plus expressive que la voix Microsoft, et sans Internet.

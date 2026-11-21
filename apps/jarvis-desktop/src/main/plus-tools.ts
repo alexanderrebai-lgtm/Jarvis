@@ -107,6 +107,7 @@ const STEP = z.union([
   z.object({ type: z.literal("resume"), quoi: z.enum(["demain", "journee", "absence"]) }),
   z.object({ type: z.literal("ecrans_veille") }),
   z.object({ type: z.literal("attendre"), secondes: z.number().min(1).max(600) }),
+  z.object({ type: z.literal("telephone"), texte: z.string().min(1).max(500) }),
 ]);
 
 export function plusTools(h: PlusHost) {

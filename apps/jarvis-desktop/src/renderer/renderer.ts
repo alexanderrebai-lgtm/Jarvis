@@ -3,6 +3,7 @@ import { renderHome } from "./pages/accueil.js";
 import { renderBubble } from "./pages/bulle.js";
 import { renderDiagnostic } from "./pages/diagnostic.js";
 import { renderSettings } from "./pages/reglages.js";
+import { renderJournal } from "./pages/journal.js";
 import { renderEngineer } from "./pages/ingenieur.js";
 import { renderPerformance } from "./pages/performances.js";
 import { renderProject } from "./pages/projet.js";
@@ -42,6 +43,9 @@ switch (page) {
     break;
   case "reglages":
     renderSettings(root);
+    break;
+  case "journal":
+    renderJournal(root);
     break;
   default:
     renderHome(root);

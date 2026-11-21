@@ -22,10 +22,16 @@ export interface WakeResult {
   command: string;
 }
 
-export function detectWake(transcript: string, alreadyListening: boolean): WakeResult {
+/** Noms supplémentaires (réglage « Autres noms ») : « Vendredi, Jarvy ». */
+export function wakeVariants(extra: string | undefined): string[] {
+  const more = (extra ?? "").split(/[,;]/).map((n) => normalize(n).replace(/'/g, "")).filter((n) => n && !n.includes(" "));
+  return [...WAKE_VARIANTS, ...more];
+}
+
+export function detectWake(transcript: string, alreadyListening: boolean, variants: string[] = WAKE_VARIANTS): WakeResult {
   const original = transcript.trim();
   const words = original.split(/\s+/).filter(Boolean);
-  const index = words.findIndex((w) => WAKE_VARIANTS.includes(normalize(w).replace(/'/g, "")));
+  const index = words.findIndex((w) => variants.includes(normalize(w).replace(/'/g, "")));
   if (index === -1) {
     return alreadyListening && original.length > 0 ? { awake: true, command: original } : { awake: false, command: "" };
   }
@@ -46,10 +52,12 @@ const INTERJECTIONS = new Set(["hey", "he", "eh", "ok", "okay", "dis", "salut", 
 export class ConversationWindow {
   private until = 0;
 
-  constructor(private readonly durationMs = 20_000, private readonly now: () => number = Date.now) {}
+  /** Durée en millisecondes, ou fonction relue à chaque ouverture (réglage modifiable à chaud). */
+  constructor(private readonly durationMs: number | (() => number) = 20_000, private readonly now: () => number = Date.now) {}
 
   open(): void {
-    this.until = this.now() + this.durationMs;
+    const duration = typeof this.durationMs === "function" ? this.durationMs() : this.durationMs;
+    this.until = this.now() + Math.max(0, duration);
   }
 
   close(): void {

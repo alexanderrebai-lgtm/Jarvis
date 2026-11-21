@@ -17,7 +17,8 @@ export type RoutineStep =
   | { type: "musique"; action: "lecture" | "pause" | "reveil"; requete?: string }
   | { type: "resume"; quoi: "demain" | "journee" | "absence" }
   | { type: "ecrans_veille" }
-  | { type: "attendre"; secondes: number };
+  | { type: "attendre"; secondes: number }
+  | { type: "telephone"; texte: string };
 
 export interface Routine {
   id: string;
@@ -42,17 +43,21 @@ export const DEFAULT_ROUTINES: Routine[] = [
   {
     id: "je-pars",
     nom: "Je pars",
-    declencheurs: ["je pars", "je m'en vais", "j'y vais", "a plus tard jarvis"],
+    declencheurs: ["je pars", "je m'en vais", "j'y vais", "a plus tard jarvis", "je sors", "je quitte la maison", "je vais au travail", "mode absent"],
     etapes: [
+      { type: "musique", action: "pause" },
       { type: "lumieres", cible: "tout", action: "eteindre" },
+      { type: "pages", action: "fermer_tout" },
+      { type: "dire", texte: "Bonne route. Je surveille la maison dans une minute, le temps que tu sortes." },
+      { type: "attendre", secondes: 60 },
       { type: "surveillance", mode: "complete" },
-      { type: "dire", texte: "Bonne route. Je garde la maison." },
+      { type: "telephone", texte: "Mode absent activé : surveillance complète, lumières éteintes." },
     ],
   },
   {
     id: "je-rentre",
     nom: "Je suis rentré",
-    declencheurs: ["je suis rentre", "je suis rentree", "je suis la", "me revoila", "c'est moi"],
+    declencheurs: ["je suis rentre", "je suis rentree", "je suis la", "me revoila", "c'est moi", "je suis de retour", "mode present"],
     etapes: [
       { type: "surveillance", mode: "off" },
       { type: "ne_pas_deranger", actif: false },
@@ -72,6 +77,25 @@ export const DEFAULT_ROUTINES: Routine[] = [
   },
 ];
 
+/** Anciennes versions des routines fournies : remplacées par les nouvelles si Alex ne les a pas modifiées. */
+const PREVIOUS_DEFAULTS: Record<string, string[]> = {
+  "je-pars": [JSON.stringify([{ type: "lumieres", cible: "tout", action: "eteindre" }, { type: "surveillance", mode: "complete" }, { type: "dire", texte: "Bonne route. Je garde la maison." }])],
+  "je-rentre": [JSON.stringify([{ type: "surveillance", mode: "off" }, { type: "ne_pas_deranger", actif: false }, { type: "lumieres", cible: "salon", action: "allumer" }, { type: "resume", quoi: "absence" }])],
+};
+
+function upgradeDefaults(all: Routine[]): Routine[] | undefined {
+  let changed = false;
+  const next = all.map((r) => {
+    const fresh = DEFAULT_ROUTINES.find((d) => d.id === r.id);
+    if (!fresh || !PREVIOUS_DEFAULTS[r.id]?.includes(JSON.stringify(r.etapes))) return r;
+    const declencheurs = [...new Set([...r.declencheurs, ...fresh.declencheurs])];
+    if (JSON.stringify(r.etapes) === JSON.stringify(fresh.etapes) && declencheurs.length === r.declencheurs.length) return r;
+    changed = true;
+    return { ...r, declencheurs, etapes: fresh.etapes.map((e) => ({ ...e })) };
+  });
+  return changed ? next : undefined;
+}
+
 function fold(text: string): string {
   return text
     .toLowerCase()
@@ -88,6 +112,8 @@ export class Routines {
 
   constructor(dataDir: string) {
     this.store = new JsonStore(dataDir, "routines", () => DEFAULT_ROUTINES.map((r) => ({ ...r, declencheurs: [...r.declencheurs], etapes: r.etapes.map((e) => ({ ...e })) })));
+    const upgraded = upgradeDefaults(this.store.read());
+    if (upgraded) this.store.update(() => upgraded);
   }
 
   list(): Routine[] {
@@ -122,12 +148,16 @@ export class Routines {
 }
 
 /** Exécute les étapes d'une routine ; une étape en échec n'arrête pas les suivantes. */
-export async function runRoutine(routine: Routine, run: (step: RoutineStep) => Promise<string | void>): Promise<{ faits: string[]; erreurs: string[] }> {
+export async function runRoutine(routine: Routine, run: (step: RoutineStep) => Promise<string | void>, say?: (text: string) => void): Promise<{ faits: string[]; erreurs: string[] }> {
   const faits: string[] = [];
   const erreurs: string[] = [];
   for (const step of routine.etapes) {
     try {
-      if (step.type === "attendre") await new Promise((r) => setTimeout(r, Math.min(600, step.secondes) * 1000));
+      if (step.type === "attendre") {
+        // Ce qui précède une pause est dit tout de suite (« je surveille dans une minute »), pas après.
+        if (say && faits.length) say(faits.splice(0).join(" "));
+        await new Promise((r) => setTimeout(r, Math.min(600, step.secondes) * 1000));
+      }
       const out = await run(step);
       if (out) faits.push(out);
     } catch (error) {

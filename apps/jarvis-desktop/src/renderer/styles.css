@@ -431,3 +431,24 @@ body.cockpit .panel h4 b { color: var(--orange); font-weight: 600; }
 .music .mus-empty span { color: var(--muted); font-size: 13px; flex: 1; }
 .music .mus-link { border: 1px solid var(--green); background: rgba(93, 255, 168, 0.1); color: var(--text); border-radius: 8px; padding: 6px 12px; cursor: pointer; font: 500 12.5px "Inter"; }
 @media (max-width: 1280px) { .panel.music { max-width: none; } }
+
+/* ---------- Journal ---------- */
+.journal-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px 0; }
+.journal-filters .chip small { opacity: 0.6; margin-left: 4px; }
+.journal-filters .chip.on { border-color: var(--cyan, #39d0ff); color: var(--cyan, #39d0ff); }
+.journal-day { display: block; width: 100%; text-align: left; padding: 8px 10px; margin-bottom: 4px; background: transparent; border: 1px solid transparent; border-radius: 8px; color: inherit; cursor: pointer; text-transform: capitalize; }
+.journal-day:hover { border-color: rgba(57, 208, 255, 0.25); }
+.journal-day.on { border-color: rgba(57, 208, 255, 0.6); background: rgba(57, 208, 255, 0.08); }
+.journal-entry { display: grid; grid-template-columns: 52px 120px 1fr auto; gap: 10px; align-items: baseline; padding: 8px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-size: 13px; }
+.journal-entry time { opacity: 0.6; font-variant-numeric: tabular-nums; }
+.journal-entry .tool { color: var(--cyan, #39d0ff); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.journal-entry .what { overflow-wrap: anywhere; }
+.journal-entry .what em { display: block; opacity: 0.7; font-style: normal; font-size: 12px; }
+.journal-entry .who { opacity: 0.55; font-size: 11px; white-space: nowrap; }
+.journal-entry.alert .tool { color: var(--gold, #ffc04d); }
+.journal-entry.refused { background: rgba(255, 70, 70, 0.06); }
+.journal-entry.refused .tool { color: var(--red, #ff5a5a); }
+.journal-error { padding: 8px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.journal-error time { font-size: 11px; opacity: 0.6; }
+.journal-error pre { margin: 4px 0 0; white-space: pre-wrap; font-size: 11px; opacity: 0.85; max-height: 6em; overflow: hidden; }
+@media (max-width: 900px) { .journal-entry { grid-template-columns: 46px 1fr; } .journal-entry .what, .journal-entry .who { grid-column: 2; } }

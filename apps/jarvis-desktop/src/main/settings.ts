@@ -123,7 +123,7 @@ export const SETTING_GROUPS: SettingGroup[] = [
   {
     id: "voix",
     titre: "Voix et oreilles",
-    description: "La voix de Jarvis, la reconnaissance vocale et le verrou vocal.",
+    description: "La voix de Jarvis, son nom, la reconnaissance vocale et le verrou vocal. Jarvis n'agit que si une phrase contient son nom (ou juste après une réponse) ; le reste n'est ni affiché ni enregistré.",
     champs: [
       { cle: "VOIX_MOTEUR", libelle: "Moteur de voix", type: "choix", options: [{ valeur: "en-ligne", libelle: "Microsoft en ligne (gratuit, par défaut)" }, { valeur: "locale", libelle: "Voix locale sur la carte graphique (plus humaine)" }] },
       { cle: "VOIX_REFERENCE", libelle: "Voix locale : enregistrement de référence (10 à 20 s, WAV ou MP3)", type: "fichier", aide: "La voix locale imite le timbre de cet enregistrement : une voix française claire, sans musique. Vide : voix par défaut du modèle.", filtres: [{ name: "Audio", extensions: ["wav", "mp3", "flac"] }] },
@@ -131,6 +131,9 @@ export const SETTING_GROUPS: SettingGroup[] = [
       { cle: "JARVIS_VOICE", libelle: "Voix Microsoft", type: "choix", options: [{ valeur: "fr-FR-VivienneMultilingualNeural", libelle: "Vivienne (par défaut)" }, { valeur: "fr-FR-DeniseNeural", libelle: "Denise" }, { valeur: "fr-FR-EloiseNeural", libelle: "Éloïse" }], redemarrage: true },
       { cle: "JARVIS_VOICE_RATE", libelle: "Vitesse", type: "texte", exemple: "+5%", redemarrage: true },
       { cle: "STT_MODEL", libelle: "Reconnaissance vocale", type: "choix", options: [{ valeur: "auto", libelle: "Automatique (selon la carte graphique)" }, { valeur: "onnx-community/whisper-large-v3-turbo", libelle: "Large v3 turbo (précise)" }, { valeur: "onnx-community/whisper-small", libelle: "Small (équilibrée)" }, { valeur: "onnx-community/whisper-base", libelle: "Base (rapide)" }], redemarrage: true },
+      { cle: "MOT_EVEIL_AUTRES", libelle: "Autres noms auxquels Jarvis répond", type: "liste", exemple: "Vendredi, Jarvy", aide: "« Jarvis » marche toujours (et ses variantes mal transcrites). Un mot par nom." },
+      { cle: "CONVERSATION_SECONDS", libelle: "Écoute de la suite sans redire son nom (secondes, 0 = toujours dire « Jarvis »)", type: "nombre", exemple: "20" },
+      { cle: "ECOUTE_SON", libelle: "Petit son quand Jarvis entend son nom", type: "choix", options: [{ valeur: "true", libelle: "Oui" }, { valeur: "false", libelle: "Non" }] },
       { cle: "VOIX_SEUIL", libelle: "Sévérité du verrou vocal (0,80 à 0,92)", type: "nombre", exemple: "0.86" },
       { cle: "BOUTON_VOLANT_PARLER", libelle: "Bouton du volant pour parler (numéro)", type: "nombre" },
     ],

@@ -135,7 +135,11 @@ export function renderHome(root: HTMLElement): void {
     if (from === "jarvis") said.textContent = lastSentences(text);
     else heard.textContent = `« ${text} »`;
   });
-  api.on("jarvis:heard", ({ transcript, awake }: { transcript: string; awake: boolean }) => awake && (heard.textContent = `« ${transcript} »`));
+  api.on("jarvis:heard", ({ transcript, awake, bip }: { transcript: string; awake: boolean; bip?: boolean }) => {
+    if (!awake) return;
+    heard.textContent = `« ${transcript} »`;
+    if (bip) playChime();
+  });
 
   // Résultats affichés par Jarvis, par-dessus le centre
   let model: { rotate: (dx: number, dy: number) => void } | undefined;
@@ -329,4 +333,29 @@ function renderWeather(body: HTMLElement, w: Weather): void {
       <div class="row"><span>${icon("soleil")}Aujourd'hui</span><span class="v">${w.aujourdhui.min}° / ${w.aujourdhui.max}° · pluie ${w.aujourdhui.pluiePct} %</span></div>
       ${w.demain ? `<div class="row"><span>${icon(w.demain.icone)}Demain · ${esc(w.demain.libelle)}</span><span class="v">${w.demain.min}° / ${w.demain.max}°</span></div>` : ""}
     </div>`;
+}
+
+/** Petit son à deux notes quand Jarvis entend son nom. */
+let chimeContext: AudioContext | undefined;
+function playChime(): void {
+  try {
+    chimeContext ??= new AudioContext();
+    const ctx = chimeContext;
+    const start = ctx.currentTime;
+    [880, 1320].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      const t = start + i * 0.09;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.12, t + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.18);
+    });
+  } catch {
+    // pas de son : ce n'est pas grave
+  }
 }

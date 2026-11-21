@@ -22,7 +22,7 @@ import { GOOGLE_SCOPES } from "@muscu/jarvis/src/google/client.js";
 import type { ToolContext } from "@muscu/jarvis/src/tools.js";
 import { parseIntent, sayDuration, type Intent } from "../shared/intents.js";
 import { protectedTarget } from "../shared/policy.js";
-import { ConversationWindow, detectWake } from "../shared/wake.js";
+import { ConversationWindow, detectWake, wakeVariants } from "../shared/wake.js";
 import { ActionLog, FileVersions, recycleScript, summarizeInput } from "./actions.js";
 import { BackupService, listBackups } from "./backup.js";
 import { Brain, findClaudeExecutable, type BrainReply } from "./brain.js";
@@ -349,7 +349,10 @@ function verifyPerson(jpeg: Buffer): Promise<boolean | undefined> {
   });
 }
 
+/** Début du mode absent (surveillance complète), pour le résumé au retour. */
+let absentSince: number | undefined;
 function setSurveillance(mode: SurveillanceMode): void {
+  if (mode === "complete" && security.mode !== "complete") absentSince = Date.now();
   security.mode = mode;
   flags.surveillance = mode;
   broadcast("jarvis:flags", flags);
@@ -579,7 +582,12 @@ voice.local = {
 const sttSetting = env("STT_MODEL") ?? "auto";
 const ears = new Ears({ cacheDir: modelCache, model: sttSetting === "auto" ? "onnx-community/whisper-small" : sttSetting, device: env("STT_DEVICE") ?? "dml" });
 const voiceLock = new VoiceLock(config.dataDir, wavlmEmbedder({ cacheDir: modelCache }), "Xenova/wavlm-base-plus-sv", Number(env("VOIX_SEUIL") ?? 0.86));
-const conversation = new ConversationWindow(Number(process.env.CONVERSATION_SECONDS ?? 20) * 1000);
+// Durée pendant laquelle Jarvis écoute la suite sans son nom (réglage modifiable sans redémarrer).
+const conversation = new ConversationWindow(() => {
+  const seconds = Number((env("CONVERSATION_SECONDS") ?? "20").replace(",", "."));
+  return (Number.isFinite(seconds) ? seconds : 20) * 1000;
+});
+const wakeNames = () => wakeVariants(env("MOT_EVEIL_AUTRES"));
 
 /** File de lecture : les phrases sont synthétisées dans l'ordre et jouées par la fenêtre d'accueil. */
 let speechQueue: Promise<void> = Promise.resolve();
@@ -604,6 +612,7 @@ function say(text: string, options: { radio?: boolean; urgent?: boolean } = {}):
 }
 
 function reply(text: string): void {
+  if (!text.trim()) return;
   broadcast("jarvis:message", { from: "jarvis", text: unmask(text) });
   say(text);
 }
@@ -963,7 +972,8 @@ async function summaryFor(quoi: "demain" | "journee" | "absence"): Promise<strin
     return [next ? `Réveil ${next.date === wake!.tomorrow() ? "demain" : `le ${next.date}`} à ${sayTime(next.heure)} (${next.raison}).` : "Pas de réveil prévu demain.", first ? `Premier rendez-vous : ${first.summary} à ${new Date(first.start).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}.` : "", "Bonne nuit."].filter(Boolean).join(" ");
   }
   if (quoi === "absence") {
-    const since = Date.now() - 12 * 3_600_000;
+    const since = absentSince ?? Date.now() - 12 * 3_600_000;
+    absentSince = undefined;
     const motions = security.events.filter((e) => new Date(e.instant).getTime() > since && e.personne !== false);
     return motions.length ? `Pendant ton absence : ${motions.length} mouvement${motions.length > 1 ? "s" : ""}, le dernier sur la caméra ${motions[0]!.camera} à ${new Date(motions[0]!.instant).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}. Les images sont sur la page Sécurité.` : "Rien à signaler pendant ton absence. Bon retour.";
   }
@@ -1001,6 +1011,9 @@ async function runStep(step: RoutineStep): Promise<string | void> {
     case "ecrans_veille":
       if (process.platform === "win32") setTimeout(() => void runPowerShell("(Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern int SendMessage(int h,int m,int w,int l);' -Name S -Namespace W -PassThru)::SendMessage(0xFFFF,0x0112,0xF170,2)", 10_000), 8_000);
       return;
+    case "telephone":
+      if (phone.enabled) await phone.text(`Jarvis : ${step.texte} (${new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })})`);
+      return;
     case "attendre":
       return;
   }
@@ -1009,9 +1022,13 @@ async function runStep(step: RoutineStep): Promise<string | void> {
 async function launchRoutine(name: string): Promise<string> {
   const routine = routines.get(name) ?? routines.match(name);
   if (!routine) return `Je ne connais pas la routine « ${name} ».`;
-  const result = await runRoutine(routine, runStep);
+  let spoke = false;
+  const result = await runRoutine(routine, runStep, (text) => {
+    spoke = true;
+    reply(text);
+  });
   actions.add({ outil: "routine", resume: routine.nom, autorise: true });
-  return [...result.faits, ...(result.erreurs.length ? [`(Souci : ${result.erreurs.join(" ; ")})`] : [])].join(" ") || "C'est fait.";
+  return [...result.faits, ...(result.erreurs.length ? [`(Souci : ${result.erreurs.join(" ; ")})`] : [])].join(" ") || (spoke ? "" : "C'est fait.");
 }
 
 function applyDisposition(name: string, speak = true): string {
@@ -1593,9 +1610,10 @@ ipcMain.on("audio:utterance", async (_event, payload: Float32Array | { samples: 
         return setState("veille");
       }
     }
-    const result = detectWake(transcript, conversation.active);
-    broadcast("jarvis:heard", { transcript: unmask(transcript), awake: result.awake, voix: identity.owner ? "Alex" : "inconnue" });
+    const result = detectWake(transcript, conversation.active, wakeNames());
+    // Discrétion : ce qui n'est pas adressé à Jarvis n'est ni affiché ni gardé.
     if (!result.awake) return setState("veille");
+    broadcast("jarvis:heard", { transcript: unmask(transcript), awake: true, voix: identity.owner ? "Alex" : "inconnue", bip: env("ECOUTE_SON") !== "false" && !conversation.active });
     if (!result.command) {
       conversation.open();
       say(pickGreeting());
@@ -1711,6 +1729,15 @@ ipcMain.handle("diagnostic:run", async () => {
   return { resultats: results, resume: sayDiagnostic(results), version: app.getVersion() };
 });
 
+ipcMain.handle("journal:lire", (_event, date?: string) => {
+  const jours = actions.days().slice(0, 60);
+  const jour = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : (jours[0] ?? new Date().toISOString().slice(0, 10));
+  const crashFile = path.join(userDir, "erreurs.log");
+  const erreurs = existsSync(crashFile)
+    ? readFileSync(crashFile, "utf8").split(/\n(?=\[\d{4}-)/).filter(Boolean).slice(-15).reverse().map((e) => ({ t: e.slice(1, 25), texte: e.slice(27, 600).trim() }))
+    : [];
+  return { jours, jour, entrees: actions.day(jour).map((e) => ({ ...e, resume: unmask(e.resume) })).reverse(), erreurs, enPanne: [...watchdog.down] };
+});
 ipcMain.handle("musique:etat", () => refreshMusic());
 ipcMain.handle("musique:commande", (_event, payload: Parameters<typeof musicCommand>[0]) => musicCommand(payload));
 

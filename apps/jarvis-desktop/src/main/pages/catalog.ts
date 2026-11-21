@@ -3,7 +3,7 @@
  * demande, chacune sur l'écran qui lui est attribué.
  */
 
-export type PageId = "accueil" | "ingenieur" | "travail" | "code" | "rd" | "securite" | "performances" | "diagnostic" | "reglages";
+export type PageId = "accueil" | "ingenieur" | "travail" | "code" | "rd" | "securite" | "performances" | "diagnostic" | "reglages" | "journal";
 
 export interface PageInfo {
   id: PageId;
@@ -27,6 +27,7 @@ export const PAGES: PageInfo[] = [
   { id: "securite", annonce: "Voilà les caméras.", titre: "Sécurité", mots: ["securite", "surveillance", "camera", "cameras", "videosurveillance", "alarme"], ecranParDefaut: "droite" },
   { id: "performances", annonce: "Voilà l'état du PC.", titre: "Performances du PC", mots: ["performance", "performances", "pc", "ordinateur", "processeur", "carte graphique", "temperatures", "systeme", "ressources"], ecranParDefaut: "gauche" },
   { id: "diagnostic", annonce: "Voilà mon bilan de santé.", titre: "Diagnostic", mots: ["diagnostic", "etat de jarvis", "verification", "bilan"], ecranParDefaut: "droite" },
+  { id: "journal", annonce: "Voilà mon journal.", titre: "Journal", mots: ["journal", "historique", "ce que tu as fait", "activite", "evenements"], ecranParDefaut: "droite" },
   { id: "reglages", annonce: "Voilà les réglages.", titre: "Réglages", mots: ["reglages", "parametres", "configuration", "options"], ecranParDefaut: "droite" },
 ];
 
