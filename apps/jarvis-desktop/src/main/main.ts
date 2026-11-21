@@ -104,7 +104,12 @@ protocol.registerSchemesAsPrivileged([{ scheme: "apercu", privileges: { standard
 
 const userDir = app.getPath("userData");
 const envFile = path.join(userDir, "jarvis.env");
-const assets = path.join(__dirname, "..", "assets");
+// Dans l'appli installée, les fichiers lus par d'autres programmes (Python…) sont hors de l'archive app.asar, dans app.asar.unpacked.
+const assets = (() => {
+  const inside = path.join(__dirname, "..", "assets");
+  const unpacked = inside.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+  return unpacked !== inside && existsSync(unpacked) ? unpacked : inside;
+})();
 mkdirSync(userDir, { recursive: true });
 if (!existsSync(envFile)) copyFileSync(path.join(assets, "jarvis.env.example"), envFile);
 process.loadEnvFile(envFile);

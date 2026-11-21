@@ -57,4 +57,30 @@ describe("voix locale", () => {
     expect(wav?.toString()).toBe("RIFF");
     expect(JSON.parse(bodies[0]!)).toEqual({ texte: "Bonjour", reference: "C:/ref.wav", expressivite: 0.6 });
   });
+
+  it("lance le serveur de voix depuis une copie hors de l'archive de l'application", async () => {
+    if (process.platform === "win32") return;
+    const { LocalVoice } = await import("../src/main/local-voice.js");
+    const { mkdtempSync, mkdirSync, writeFileSync, chmodSync, existsSync, readFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const path = await import("node:path");
+    const ws = mkdtempSync(path.join(tmpdir(), "voix-"));
+    const assets = mkdtempSync(path.join(tmpdir(), "assets-"));
+    mkdirSync(path.join(assets, "voix"));
+    writeFileSync(path.join(assets, "voix", "serveur_voix.py"), "# serveur");
+    // Faux Python : note le script reçu et annonce qu'il est prêt.
+    const bin = path.join(ws, "voix", ".venv", "bin");
+    mkdirSync(bin, { recursive: true });
+    const log = path.join(ws, "argv.txt");
+    writeFileSync(path.join(bin, "python"), `#!/bin/sh\necho "$1" > ${log}\necho '{"pret": true, "appareil": "cuda"}'\nsleep 5\n`);
+    chmodSync(path.join(bin, "python"), 0o755);
+    writeFileSync(path.join(ws, "voix", ".installee"), "x");
+    const lv = new LocalVoice(ws, { assetsDir: assets, findPython: async () => undefined });
+    expect(await lv.start()).toBe(true);
+    lv.stop();
+    const script = readFileSync(log, "utf8").trim();
+    expect(script).toBe(path.join(ws, "voix", "serveur_voix.py"));
+    expect(existsSync(script)).toBe(true);
+    expect(lv.device).toBe("cuda");
+  });
 });

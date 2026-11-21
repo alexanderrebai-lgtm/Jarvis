@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { runProcess } from "./lab.js";
 
@@ -76,7 +76,20 @@ export class LocalVoice {
     if (!this.installed) return Promise.resolve(false);
     this.status = "demarrage";
     this.starting = new Promise<boolean>((resolve) => {
-      const child = spawn(this.python, [path.join(this.options.assetsDir, "voix", "serveur_voix.py"), "--port", String(this.port), "--jeton", this.token], {
+      // Le script est copié dans Documents\Jarvis\voix : Python ne sait pas lire l'archive de l'application.
+      const script = path.join(this.dir, "serveur_voix.py");
+      try {
+        copyFileSync(path.join(this.options.assetsDir, "voix", "serveur_voix.py"), script);
+      } catch (error) {
+        if (!existsSync(script)) {
+          this.lastError = `script de la voix introuvable (${error instanceof Error ? error.message : error})`;
+          this.starting = undefined;
+          this.status = "erreur";
+          resolve(false);
+          return;
+        }
+      }
+      const child = spawn(this.python, [script, "--port", String(this.port), "--jeton", this.token], {
         cwd: this.dir,
         env: { ...process.env, HF_HOME: path.join(this.dir, "modeles"), PYTHONIOENCODING: "utf-8" },
         windowsHide: true,
