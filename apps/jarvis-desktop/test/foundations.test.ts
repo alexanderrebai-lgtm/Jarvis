@@ -140,7 +140,8 @@ describe("tâches de fond", () => {
     tasks.launch("A", "a");
     tasks.launch("B", "b");
     const c = tasks.launch("C", "c");
-    await new Promise((r) => setTimeout(r, 120));
+    // Attend la fin des trois tâches (sans délai fixe, fragile sur une machine chargée).
+    for (let i = 0; i < 200 && done.length < 3; i++) await new Promise((r) => setTimeout(r, 10));
     expect(done).toHaveLength(3);
     expect(maxRunning).toBe(2);
     expect(tasks.get(c.id)!.etapes).toEqual(["je cherche sur le web"]);
