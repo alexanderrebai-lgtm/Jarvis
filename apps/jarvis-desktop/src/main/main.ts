@@ -152,7 +152,9 @@ const mail = google ? new MailService(google.gmail) : undefined;
 const agenda = google ? new AgendaService(google.calendar, config.timeZone) : undefined;
 const browser = config.browserEnabled ? new WebBrowser({ dataDir: config.dataDir, executablePath: config.chromiumPath }) : undefined;
 const home = config.homeAssistant ? new HomeAssistant(config.homeAssistant.url, config.homeAssistant.token) : undefined;
-const tapo = config.tapo ? new TapoHome(realTapoDriver(config.tapo.email, config.tapo.password, parseDeviceList(config.tapo.devices))) : undefined;
+// La liste des appareils est gardée : Jarvis ne se connecte au compte TP-Link qu'une fois par jour (sinon TP-Link verrouille le compte).
+const tapoCache = path.join(config.dataDir, "tapo-appareils.json");
+const tapo = config.tapo ? new TapoHome(realTapoDriver(config.tapo.email, config.tapo.password, parseDeviceList(config.tapo.devices)), { cacheFile: tapoCache, cacheKey: config.tapo.email.toLowerCase() }) : undefined;
 const tools: ToolContext = { mail, agenda, notes, pending, inbox, browser, home, tapo };
 
 // ---------- Pages et fenêtres ----------
@@ -1861,7 +1863,11 @@ async function runSettingAction(id: string): Promise<{ ok: boolean; message: str
       }
       case "tapo": {
         if (!env("TAPO_EMAIL") || !env("TAPO_PASSWORD")) return { ok: false, message: "Renseigne l'e-mail et le mot de passe, puis enregistre." };
-        const test = new TapoHome(realTapoDriver(env("TAPO_EMAIL")!, env("TAPO_PASSWORD")!, parseDeviceList(env("TAPO_DEVICES"))));
+        const test = new TapoHome(realTapoDriver(env("TAPO_EMAIL")!, env("TAPO_PASSWORD")!, parseDeviceList(env("TAPO_DEVICES"))), { cacheFile: tapoCache, cacheKey: env("TAPO_EMAIL")!.toLowerCase() });
+        // Liste déjà connue : on teste les appareils sans se reconnecter au compte TP-Link.
+        if (!test.known || parseDeviceList(env("TAPO_DEVICES")).length) await test.refresh().catch((error: unknown) => {
+          if (!test.known) throw error;
+        });
         const states = await test.states();
         if (!states.length) return { ok: false, message: "Connexion faite, mais aucun appareil trouvé. Vérifie que le PC est sur le même réseau que tes ampoules, ou liste-les avec leur adresse IP." };
         const down = states.filter((d) => d.allume === null);

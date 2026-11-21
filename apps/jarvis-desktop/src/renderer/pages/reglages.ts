@@ -113,6 +113,8 @@ export function renderSettings(root: HTMLElement): void {
       status.textContent = r.redemarrage.length ? "Enregistré. Certains changements demandent de redémarrer Jarvis (bouton en haut)." : "Enregistré et appliqué.";
       for (const [key, input] of inputs) if (g.champs.find((x) => x.cle === key)?.type === "secret" && input.value) input.value = "";
       view = await api.invoke<View>("reglages:lire");
+      // Le champ montre tout de suite que le mot de passe est enregistré (sinon on croit qu'il a disparu).
+      for (const [key, input] of inputs) if (g.champs.find((x) => x.cle === key)?.type === "secret" && view.secrets[key] && input instanceof HTMLInputElement) input.placeholder = "•••••• enregistré dans le coffre-fort (tape pour remplacer)";
       return true;
     };
     const saveBtn = el("button", "primary", "Enregistrer");

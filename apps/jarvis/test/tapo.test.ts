@@ -114,3 +114,47 @@ describe("Tapo", () => {
     expect(decodeAlias("Lamp")).toBe("Lamp");
   });
 });
+
+describe("compte TP-Link ménagé", async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const { TapoHome, explainTapoError } = await import("../src/tapo.js");
+  const conn = { turnOn: async () => {}, turnOff: async () => {}, setBrightness: async () => {}, setColour: async () => {}, getDeviceInfo: async () => ({ device_on: true, model: "L530" }), getEnergyUsage: async () => ({}) };
+
+  it("garde la liste des appareils et ne se reconnecte pas au compte à chaque contrôle", async () => {
+    let logins = 0;
+    let now = 0;
+    const driver = { discover: async () => (logins++, [{ nom: "Salon", type: "ampoule" as const, modele: "L530" }]), connect: async () => conn };
+    const cacheFile = path.join(mkdtempSync(path.join(tmpdir(), "tapo-")), "tapo.json");
+    const home = new TapoHome(driver, { cacheFile, cacheKey: "a@b.fr", now: () => now });
+    for (let i = 0; i < 20; i++) {
+      now += 15 * 60_000;
+      await home.states();
+    }
+    expect(logins).toBe(1 + Math.floor((20 * 15) / (24 * 60)));
+    // Redémarrage de Jarvis : la liste gardée suffit.
+    const again = new TapoHome(driver, { cacheFile, cacheKey: "a@b.fr", now: () => now });
+    await again.states();
+    expect(logins).toBe(1);
+    // Un autre compte ignore la liste gardée.
+    const other = new TapoHome(driver, { cacheFile, cacheKey: "autre@b.fr", now: () => now });
+    await other.states();
+    expect(logins).toBe(2);
+  });
+
+  it("après un compte verrouillé, attend avant de réessayer et explique en français", async () => {
+    let tries = 0;
+    let now = 0;
+    const driver = { discover: async () => { tries++; throw new Error("Unrecognised Error Code: -20661 (Account locked)"); }, connect: async () => conn };
+    const home = new TapoHome(driver, { now: () => now });
+    await expect(home.states()).rejects.toThrow(/verrouillé/);
+    now += 10 * 60_000;
+    await expect(home.states()).rejects.toThrow(/verrouillé/);
+    expect(tries).toBe(1);
+    now += 60 * 60_000;
+    await expect(home.states()).rejects.toThrow();
+    expect(tries).toBe(2);
+    expect(explainTapoError(new Error("-20601"))).toMatch(/mot de passe/);
+  });
+});

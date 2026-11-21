@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { cloudLogin, loginDevice, loginDeviceByIp, type TapoDevice } from "tp-link-tapo-connect";
 
 /**
@@ -101,16 +103,102 @@ function normalize(text: string): string {
 
 export type TapoAction = "allumer" | "eteindre";
 
+/** Erreurs du compte TP-Link expliquées en français. */
+export function explainTapoError(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  if (/-20661|locked/i.test(text)) return "TP-Link a verrouillé ton compte pour un moment, après trop de connexions. Ne réessaie pas tout de suite : attends environ une heure (chaque essai prolonge le blocage). Jarvis garde maintenant la liste de tes appareils et ne se connecte plus au compte qu'une fois par jour.";
+  if (/-20601|-20600|incorrect|password/i.test(text)) return "TP-Link refuse l'e-mail ou le mot de passe : vérifie-les dans l'appli Tapo (ce sont ceux de ton compte TP-Link).";
+  if (/-20004|-20675|too many|frequent/i.test(text)) return "TP-Link demande d'attendre un peu avant de se reconnecter. Réessaie dans une heure.";
+  if (/ENOTFOUND|ETIMEDOUT|ECONNRESET|fetch failed|getaddrinfo/i.test(text)) return "Le serveur TP-Link ne répond pas : vérifie la connexion Internet.";
+  return text;
+}
+
+export interface TapoHomeOptions {
+  now?: () => number;
+  /** Fichier où garder la liste des appareils (pas besoin du compte TP-Link à chaque démarrage). */
+  cacheFile?: string;
+  /** Compte auquel la liste appartient (un autre compte ignore la liste gardée). */
+  cacheKey?: string;
+  /** Liste rafraîchie au plus une fois par… (24 h par défaut). */
+  rediscoverMs?: number;
+  /** Après un échec de connexion au compte, pas de nouvel essai avant… (1 h par défaut). */
+  backoffMs?: number;
+}
+
 export class TapoHome {
   private devices: TapoEntry[] | undefined;
   private discoveredAt = 0;
+  private failedAt: number | undefined;
+  private lastError: string | undefined;
   private readonly connections = new Map<string, TapoConnection>();
+  private readonly now: () => number;
 
-  constructor(private readonly driver: TapoDriver, private readonly now: () => number = Date.now) {}
+  constructor(private readonly driver: TapoDriver, private readonly options: TapoHomeOptions = {}) {
+    this.now = options.now ?? Date.now;
+    this.loadCache();
+  }
+
+  private loadCache(): void {
+    const file = this.options.cacheFile;
+    if (!file || !existsSync(file)) return;
+    try {
+      const saved = JSON.parse(readFileSync(file, "utf8")) as { cle?: string; date: number; appareils: TapoEntry[]; echec?: number; erreur?: string };
+      if (saved.cle !== this.options.cacheKey) return;
+      if (Array.isArray(saved.appareils) && saved.appareils.length) {
+        this.devices = saved.appareils;
+        this.discoveredAt = saved.date;
+      }
+      if (saved.echec !== undefined) {
+        this.failedAt = saved.echec;
+        this.lastError = saved.erreur;
+      }
+    } catch {
+      // liste illisible : on la refera
+    }
+  }
+
+  private saveCache(): void {
+    const file = this.options.cacheFile;
+    if (!file) return;
+    try {
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, JSON.stringify({ cle: this.options.cacheKey, date: this.discoveredAt, appareils: this.devices ?? [], echec: this.failedAt, erreur: this.lastError }));
+    } catch {
+      // pas grave : la liste sera refaite au prochain démarrage
+    }
+  }
+
+  /** Connaît-on déjà des appareils (sans se connecter au compte) ? */
+  get known(): number {
+    return this.devices?.length ?? 0;
+  }
+
+  /** Relit la liste des appareils sur le compte TP-Link (bouton « Tester »), sauf pendant un blocage. */
+  async refresh(): Promise<void> {
+    this.discoveredAt = 0;
+    await this.entries();
+  }
 
   private async entries(): Promise<TapoEntry[]> {
-    if (!this.devices || this.now() - this.discoveredAt > 10 * 60_000) {
-      const devices = await this.driver.discover();
+    const fresh = this.devices && this.now() - this.discoveredAt < (this.options.rediscoverMs ?? 24 * 3_600_000);
+    if (!fresh) {
+      // Après un échec (compte verrouillé, mot de passe refusé), on ne réessaie pas en boucle : TP-Link prolongerait le blocage.
+      if (this.failedAt !== undefined && this.now() - this.failedAt < (this.options.backoffMs ?? 3_600_000)) {
+        if (this.devices) return this.devices;
+        throw new Error(this.lastError ?? "Compte TP-Link indisponible pour le moment.");
+      }
+      let devices: TapoEntry[];
+      try {
+        devices = await this.driver.discover();
+      } catch (error) {
+        this.failedAt = this.now();
+        this.lastError = explainTapoError(error);
+        this.saveCache();
+        if (this.devices) return this.devices;
+        throw new Error(this.lastError);
+      }
+      this.failedAt = undefined;
+      this.lastError = undefined;
       this.devices = devices;
       this.discoveredAt = this.now();
       // Liste manuelle : on demande à chaque appareil s'il est ampoule ou prise.
@@ -124,8 +212,9 @@ export class TapoHome {
             d.type = kindOf(String(info.type ?? ""), d.modele);
           }),
       );
+      this.saveCache();
     }
-    return this.devices;
+    return this.devices!;
   }
 
   private async connection(entry: TapoEntry): Promise<TapoConnection> {
