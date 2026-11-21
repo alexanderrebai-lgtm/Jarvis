@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, writeFileSync as writeLog } from "node:fs";
 import path from "node:path";
 import { runProcess } from "./lab.js";
 
@@ -61,7 +61,7 @@ export class LocalVoice {
       const cpu = await pip(["torch", "torchaudio"], "PyTorch (processeur)");
       if (cpu.code !== 0) return `Installation de PyTorch impossible : ${cpu.stderr.slice(-500)}`;
     }
-    const tts = await pip(["chatterbox-tts"], "Téléchargement de Chatterbox");
+    const tts = await pip(["chatterbox-tts", "setuptools<81"], "Téléchargement de Chatterbox");
     if (tts.code !== 0) return `Installation de Chatterbox impossible : ${tts.stderr.slice(-500)}`;
     const { writeFileSync } = await import("node:fs");
     writeFileSync(path.join(this.dir, ".installee"), new Date().toISOString());
@@ -89,6 +89,11 @@ export class LocalVoice {
           return;
         }
       }
+      try {
+        writeLog(path.join(this.dir, "serveur.log"), `--- ${new Date().toISOString()}\n`);
+      } catch {
+        // pas grave
+      }
       const child = spawn(this.python, [script, "--port", String(this.port), "--jeton", this.token], {
         cwd: this.dir,
         env: { ...process.env, HF_HOME: path.join(this.dir, "modeles"), PYTHONIOENCODING: "utf-8" },
@@ -112,10 +117,18 @@ export class LocalVoice {
           finish(true);
         }
       });
-      child.stderr.on("data", (d: Buffer) => (stderr = (stderr + d.toString()).slice(-2000)));
+      child.stderr.on("data", (d: Buffer) => {
+        stderr = (stderr + d.toString()).slice(-20_000);
+        // Journal complet, pour comprendre une panne (Documents\Jarvis\voix\serveur.log).
+        try {
+          appendFileSync(path.join(this.dir, "serveur.log"), d);
+        } catch {
+          // pas grave
+        }
+      });
       child.on("exit", () => {
         this.server = undefined;
-        if (this.status !== "prete") finish(false, stderr.split("\n").filter(Boolean).slice(-2).join(" ") || "le serveur de voix s'est arrêté");
+        if (this.status !== "prete") finish(false, summarizePythonError(stderr) || "le serveur de voix s'est arrêté");
         else this.status = "erreur";
       });
     });
@@ -143,4 +156,18 @@ export class LocalVoice {
     }
     return Buffer.from(await res.arrayBuffer());
   }
+}
+
+/** Dernière erreur Python lisible : « TypeError: … (dans fichier.py, ligne 12) ». */
+export function summarizePythonError(stderr: string): string {
+  const lines = stderr.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const errorIndex = lines.map((l, i) => (/^[A-Za-z_.]*(Error|Exception)\b.*:|^[A-Za-z_.]*(Error|Exception)$/.test(l) ? i : -1)).filter((i) => i >= 0).pop();
+  if (errorIndex === undefined) return lines.filter((l) => !/^[\^~ ]+$/.test(l)).slice(-2).join(" ");
+  const where = lines
+    .slice(0, errorIndex)
+    .reverse()
+    .find((l) => /^File "/.test(l))
+    ?.match(/File "([^"]+)", line (\d+)/);
+  const file = where ? `${where[1]!.split(/[\\/]/).slice(-2).join("/")}, ligne ${where[2]}` : "";
+  return `${lines[errorIndex]}${file ? ` (dans ${file})` : ""}. Détails : Documents\\Jarvis\\voix\\serveur.log`;
 }

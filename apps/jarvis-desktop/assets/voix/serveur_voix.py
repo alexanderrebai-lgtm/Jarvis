@@ -21,6 +21,28 @@ args = parser.parse_args()
 import torch  # noqa: E402
 import torchaudio  # noqa: E402
 
+# Chatterbox ajoute un tatouage inaudible (paquet « perth ») ; sur certains PC Windows ce module ne se
+# charge pas (PerthImplicitWatermarker vaut None -> « 'NoneType' object is not callable »). Pour un usage
+# chez soi, on le remplace par le tatoueur neutre fourni par le même paquet.
+try:
+    import perth  # noqa: E402
+
+    if getattr(perth, "PerthImplicitWatermarker", None) is None:
+        neutre = getattr(perth, "DummyWatermarker", None)
+        if neutre is None:
+            class _Neutre:
+                def apply_watermark(self, wav, sample_rate=None, **_):
+                    return wav
+
+                def get_watermark(self, *a, **k):
+                    return 0.0
+
+            neutre = _Neutre
+        perth.PerthImplicitWatermarker = neutre
+        print("tatouage audio indisponible : tatoueur neutre utilisé", file=sys.stderr, flush=True)
+except ImportError:
+    pass
+
 try:
     from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 except ImportError:  # selon la version du paquet

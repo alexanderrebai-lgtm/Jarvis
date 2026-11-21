@@ -84,3 +84,17 @@ describe("voix locale", () => {
     expect(lv.device).toBe("cuda");
   });
 });
+
+describe("erreurs Python de la voix locale", () => {
+  it("résume la trace Python en une ligne utile", async () => {
+    const { summarizePythonError } = await import("../src/main/local-voice.js");
+    const trace = `Traceback (most recent call last):
+  File "C:\\Users\\a\\Documents\\Jarvis\\voix\\serveur_voix.py", line 52, in <module>
+    model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+  File "C:\\Users\\a\\Documents\\Jarvis\\voix\\.venv\\Lib\\site-packages\\chatterbox\\mtl_tts.py", line 180, in __init__
+    self.watermarker = perth.PerthImplicitWatermarker()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: 'NoneType' object is not callable`;
+    expect(summarizePythonError(trace)).toBe("TypeError: 'NoneType' object is not callable (dans chatterbox/mtl_tts.py, ligne 180). Détails : Documents\\Jarvis\\voix\\serveur.log");
+  });
+});
