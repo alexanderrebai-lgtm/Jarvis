@@ -178,6 +178,17 @@ export const SETTING_GROUPS: SettingGroup[] = [
     actions: [{ id: "sante-adresse", libelle: "Voir l'adresse pour le téléphone" }],
   },
   {
+    id: "proactif",
+    titre: "Rappels proactifs",
+    description: "De lui-même, aux bonnes heures, Jarvis ressort une note que tu as oubliée (« tu devais rappeler le garage »), le contexte utile juste avant un rendez-vous, ou un écho d'il y a un an. Un garde-fou strict l'empêche de devenir pénible : rien pendant un jeu, en « ne pas déranger » ou en dehors des heures choisies.",
+    champs: [
+      { cle: "RAPPEL_PROACTIF", libelle: "Jarvis me rappelle des choses de lui-même", type: "choix", options: [{ valeur: "on", libelle: "Oui (conseillé)" }, { valeur: "off", libelle: "Non" }], redemarrage: true, aide: "Jarvis relie tes notes, ta mémoire et ton agenda pour ressortir la bonne info au bon moment, sans que tu demandes. Tu vois tout ce qu'il a ressorti sur la page « Mémoire »." },
+      { cle: "RAPPEL_MAX_JOUR", libelle: "Nombre maximum de rappels par jour", type: "nombre", exemple: "4", redemarrage: true },
+      { cle: "RAPPEL_CALME_AVANT", libelle: "Silence avant cette heure", type: "nombre", exemple: "9", redemarrage: true, aide: "Avant cette heure locale, Jarvis ne lance aucun rappel de lui-même." },
+      { cle: "RAPPEL_CALME_APRES", libelle: "Silence après cette heure", type: "nombre", exemple: "22", redemarrage: true, aide: "À partir de cette heure locale, Jarvis se tait." },
+    ],
+  },
+  {
     id: "sauvegardes",
     titre: "Sauvegardes et mises à jour",
     description: "Une sauvegarde est faite chaque nuit dans Documents\\Jarvis\\sauvegardes ; tu peux en envoyer une copie ailleurs.",

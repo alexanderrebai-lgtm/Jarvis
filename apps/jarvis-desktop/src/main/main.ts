@@ -48,6 +48,7 @@ import { Pseudonymizer } from "./privacy.js";
 import { Procedures } from "./procedures.js";
 import { insideProject, ProjectView } from "./project-view.js";
 import { Proactive } from "./proactive.js";
+import { RecallEngine, REGLAGE_DEFAUT, type RecallReglage } from "./recall.js";
 import type { Verbosity } from "./racing/engineer.js";
 import { RaceManager } from "./racing/manager.js";
 import { deepResearchPrompt, Literature } from "./research/literature.js";
@@ -607,6 +608,7 @@ const briefingStore = new BriefingStore(config.dataDir);
 // ---------- Santé (montre connectée) ----------
 const healthStore = new HealthStore(config.dataDir);
 let healthServer: HealthServer | undefined;
+let recall: RecallEngine | undefined;
 let healthTokenCache: string | undefined;
 function healthToken(): string {
   if (healthTokenCache) return healthTokenCache;
@@ -1653,7 +1655,7 @@ ipcMain.handle("connecteurs:tester", async (_event, nom: string) => {
 
 // ---------- Mémoire (page Mémoire) ----------
 
-ipcMain.handle("memoire:lire", () => ({ faits: [...notes.memories()].reverse(), notes: notes.list(100) }));
+ipcMain.handle("memoire:lire", () => ({ faits: [...notes.memories()].reverse(), notes: notes.list(100), rappels: recall?.recents(8) ?? [] }));
 ipcMain.handle("memoire:ajouter", (_event, fait: string) => (fait?.trim() ? notes.remember(fait.trim()) : null));
 ipcMain.handle("memoire:modifier", (_event, payload: { id: string; fait: string }) => notes.updateMemory(payload.id, payload.fait.trim()));
 ipcMain.handle("memoire:oublier", (_event, id: string) => notes.forget(id));
@@ -1887,6 +1889,25 @@ void app.whenReady().then(async () => {
     notify: host.notify,
     canSpeak: () => !flags.doNotDisturb && !race.active,
   }).start();
+  const rappelReglage: RecallReglage = {
+    ...REGLAGE_DEFAUT,
+    actif: (env("RAPPEL_PROACTIF") ?? "on").toLowerCase() !== "off",
+    maxParJour: Number(env("RAPPEL_MAX_JOUR")) || REGLAGE_DEFAUT.maxParJour,
+    calmeAvant: Number(env("RAPPEL_CALME_AVANT")) || REGLAGE_DEFAUT.calmeAvant,
+    calmeApres: Number(env("RAPPEL_CALME_APRES")) || REGLAGE_DEFAUT.calmeApres,
+  };
+  recall = new RecallEngine({
+    dataDir: config.dataDir,
+    timeZone: config.timeZone,
+    notes,
+    agenda,
+    reglage: rappelReglage,
+    say: (text) => reply(text),
+    notify: host.notify,
+    canSpeak: () => !flags.doNotDisturb && !flags.jeu && !race.active && !conversation.active,
+    now: () => new Date(),
+  });
+  recall.start();
   race.start();
   wake?.start();
   timers.restore();
@@ -1934,6 +1955,7 @@ void app.whenReady().then(async () => {
 
 app.on("will-quit", () => {
   watchdog.stop();
+  recall?.stop();
   healthServer?.stop();
   globalShortcut.unregisterAll();
   race.stop();

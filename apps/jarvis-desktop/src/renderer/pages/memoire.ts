@@ -3,6 +3,7 @@ import { buildPage, ICONS } from "../hud.js";
 
 interface Fact { id: string; fait: string; creeLe: string }
 interface Note { id: string; texte: string; tags: string[]; creeLe: string; rappelLe?: string; rappelEnvoye?: boolean }
+interface Rappel { cle: string; source: string; texte: string; instant: string }
 
 const day = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
 
@@ -17,7 +18,8 @@ export function renderMemory(root: HTMLElement): void {
   about.body.innerHTML = `<p class="lead">Quand tu dis quelque chose d'utile pour plus tard (« je suis allergique aux arachides », « ma sœur s'appelle Léa »), Jarvis le retient ici. Ces souvenirs sont relus au début de chaque conversation.</p><p class="lead">Tu peux tout corriger ou effacer. Rien ne quitte le PC, sauf ce que Claude lit pendant une conversation.</p>`;
   const add = panel("Ajouter un souvenir", "", { icon: ICONS.note, accent: "green" });
   add.body.innerHTML = `<textarea class="memory-new" rows="3" placeholder="ex. Je préfère qu'on me réveille en douceur, avec de la musique calme."></textarea><button class="health-button" data-add>Retenir</button>`;
-  left.append(about.root, add.root);
+  const proactif = panel("Ce que Jarvis a ressorti", "", { icon: ICONS.pulse, link: false });
+  left.append(about.root, add.root, proactif.root);
 
   const facts = panel("Ce que je sais de toi", "grow", { icon: ICONS.list, link: false });
   center.append(facts.root);
@@ -26,7 +28,7 @@ export function renderMemory(root: HTMLElement): void {
   right.append(notes.root);
   root.append(page);
 
-  let data: { faits: Fact[]; notes: Note[] } = { faits: [], notes: [] };
+  let data: { faits: Fact[]; notes: Note[]; rappels: Rappel[] } = { faits: [], notes: [], rappels: [] };
   const matches = (text: string) => !search.value.trim() || text.toLowerCase().includes(search.value.trim().toLowerCase());
 
   const draw = () => {
@@ -61,10 +63,14 @@ export function renderMemory(root: HTMLElement): void {
         await load();
       };
     });
+    const whenShort = (iso: string) => new Date(iso).toLocaleString("fr-FR", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    proactif.body.innerHTML = data.rappels.length
+      ? data.rappels.map((r) => `<div class="memory-note"><p>${esc(r.texte)}</p><div class="memory-meta"><small>${esc(whenShort(r.instant))}</small></div></div>`).join("")
+      : `<div class="empty">Rien pour l'instant. De lui-même, aux bonnes heures, Jarvis ressort une note oubliée ou un rappel utile avant un rendez-vous.</div>`;
   };
 
   const load = async () => {
-    data = await api.invoke<{ faits: Fact[]; notes: Note[] }>("memoire:lire");
+    data = await api.invoke<{ faits: Fact[]; notes: Note[]; rappels: Rappel[] }>("memoire:lire");
     draw();
   };
   search.oninput = draw;
