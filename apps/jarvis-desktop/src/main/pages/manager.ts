@@ -223,7 +223,9 @@ export class PageManager {
     if (!win) return;
     clearTimeout(this.releaseTimers.get(id));
     this.releaseTimers.delete(id);
-    const wasVisible = win.isVisible();
+    const wasVisible = win.isVisible() && !win.isMinimized();
+    // Une fenêtre réduite dans la barre des tâches revient à sa place.
+    if (win.isMinimized()) win.restore();
     // Pendant une partie, Jarvis ne passe jamais devant le jeu au clavier.
     if (focus && !this.game) {
       win.show();

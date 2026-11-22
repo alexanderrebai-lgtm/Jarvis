@@ -1347,7 +1347,9 @@ ipcMain.on("jarvis:listen", () => {
 ipcMain.on("jarvis:show", showHome);
 ipcMain.on("jarvis:toggle", (_event, name: "micro" | "cameras" | "doNotDisturb") => setFlag(name, !flags[name]));
 ipcMain.on("page:open", (_event, id: PageId) => {
-  if (PAGES.some((p) => p.id === id)) pages.openPage(id);
+  // Le bouton « Accueil » ramène l'accueil au premier plan (même réduit ou caché derrière une page).
+  if (id === "accueil") showHome();
+  else if (PAGES.some((p) => p.id === id)) pages.openPage(id);
 });
 ipcMain.on("page:close", (event) => {
   const page = PAGES.find((p) => pages.window(p.id)?.webContents === event.sender);
