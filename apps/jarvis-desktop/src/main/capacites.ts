@@ -27,6 +27,8 @@ export interface ContexteCapacites {
   connecteurs: number;
   documentsBibliotheque: number;
   motEveilActif: boolean;
+  /** Noms des connecteurs ajoutés (pour reconnaître Screenpipe, Home Assistant…). */
+  connecteurNoms?: string[];
 }
 
 export function capacites(c: ContexteCapacites): Capacite[] {
@@ -49,6 +51,9 @@ export function capacites(c: ContexteCapacites): Capacite[] {
     { id: "maison", titre: "Maison connectée (Tapo)", quoi: "Il allume, éteint et règle tes ampoules et prises.", exemple: "« Mets la lumière du salon à 30 %. »", etat: rempli("TAPO_EMAIL", "TAPO_PASSWORD") ? "active" : "a-configurer", ...(rempli("TAPO_EMAIL", "TAPO_PASSWORD") ? {} : { manque: "Ajoute l'e-mail et le mot de passe du compte Tapo." }), groupe: "tapo" },
     { id: "cameras", titre: "Caméras de surveillance", quoi: "Détection de personne, dissuasion, clips, alertes sur ton téléphone.", exemple: "« Active la surveillance complète. »", etat: rempli("TAPO_CAMERAS", "TAPO_CAMERA_COMPTE", "TAPO_CAMERA_MOT_DE_PASSE") ? "active" : "a-configurer", ...(rempli("TAPO_CAMERAS", "TAPO_CAMERA_COMPTE", "TAPO_CAMERA_MOT_DE_PASSE") ? {} : { manque: "Indique tes caméras et leur compte." }), groupe: "cameras" },
     { id: "alertes", titre: "Alertes sur le téléphone", quoi: "Telegram : alertes, briefings et conversations quand tu es sorti.", exemple: "(Jarvis t'écrit)", etat: rempli("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID") ? "active" : "a-configurer", ...(rempli("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID") ? {} : { manque: "Crée un bot Telegram (@BotFather) et trouve ta conversation." }), groupe: "alertes" },
+    { id: "satellites", titre: "Micros des autres pièces", quoi: "Un micro dans la cuisine ou la chambre envoie ta phrase à Jarvis et lit sa réponse.", exemple: "(le micro envoie « allume la lumière »)", etat: e("SATELLITE_ACTIF") === "true" ? "active" : "materiel", ...(e("SATELLITE_ACTIF") === "true" ? {} : { manque: "Il te faut un micro (module ESP32 ~15 €, Home Assistant Voice ~60 €…) ; puis active ce réglage." }), groupe: "satellites" },
+    { id: "memoire-ecran", titre: "Mémoire de ce que tu as fait à l'écran", quoi: "« Qu'est-ce que je regardais mardi ? » via Screenpipe. Facultatif et très sensible : tout ce qui s'affiche est enregistré sur ton PC.", exemple: "« Qu'est-ce que je regardais mardi après-midi ? »", etat: c.connecteurNoms?.includes("memoire-ecran") ? "active" : "desactivee", ...(c.connecteurNoms?.includes("memoire-ecran") ? {} : { manque: "Facultatif : installe Screenpipe, puis ajoute le préréglage « memoire-ecran » dans Connecteurs." }), groupe: "connecteurs" },
+    { id: "relecture", titre: "Missions relues par un second agent", quoi: "Pour un travail important, un second agent en lecture seule relit avant de te le rendre.", exemple: "« Fais-moi ça en tâche de fond, avec relecture. »", etat: "toujours" },
     { id: "ecran", titre: "Regarder ton écran", quoi: "Il propose son aide quand il voit une erreur ou un blocage (et se tait en jeu).", exemple: "« Surveille mon écran. »", etat: ecran ? "active" : "desactivee", groupe: "general" },
     { id: "course", titre: "Ingénieur de course", quoi: "Radio de stand pendant Le Mans Ultimate ou F1 : pneus, carburant, écarts.", exemple: "(il se lance avec le jeu)", etat: "toujours" },
     { id: "sante-pc", titre: "Santé du PC", quoi: "Diagnostic, causes probables des plantages, optimisations réversibles.", exemple: "« Fais le bilan de santé du PC. »", etat: "toujours" },

@@ -21,10 +21,12 @@ export interface BackgroundTask {
   erreur?: string;
   /** Page où montrer le résultat. */
   page?: "travail" | "rd" | "code" | "accueil";
+  /** Un second agent relit le travail avant le résultat. */
+  relecture?: boolean;
 }
 
 export interface TaskRunner {
-  (consigne: string, events: { onTool: (label: string) => void }, signal: AbortSignal): Promise<{ text: string; error?: string }>;
+  (consigne: string, events: { onTool: (label: string) => void }, signal: AbortSignal, opts?: { relecture?: boolean }): Promise<{ text: string; error?: string }>;
 }
 
 export class BackgroundTasks {
@@ -65,8 +67,8 @@ export class BackgroundTasks {
     this.options.onUpdate?.(this.list());
   }
 
-  launch(titre: string, consigne: string, page?: BackgroundTask["page"]): BackgroundTask {
-    const task: BackgroundTask = { id: newId("tache"), titre, consigne, etat: "attente", creeLe: new Date().toISOString(), etapes: [], ...(page ? { page } : {}) };
+  launch(titre: string, consigne: string, page?: BackgroundTask["page"], relecture = false): BackgroundTask {
+    const task: BackgroundTask = { id: newId("tache"), titre, consigne, etat: "attente", creeLe: new Date().toISOString(), etapes: [], ...(page ? { page } : {}), ...(relecture ? { relecture } : {}) };
     this.store.update((all) => [...all, task].slice(-60));
     this.queue.push(task.id);
     this.options.onUpdate?.(this.list());
@@ -100,7 +102,7 @@ export class BackgroundTasks {
     this.controllers.set(id, controller);
     this.patch(id, { etat: "en_cours", debut: new Date().toISOString() });
     try {
-      const reply = await this.options.run(task.consigne, { onTool: (label) => this.patch(id, { etapes: [...(this.get(id)?.etapes ?? []), label].slice(-30) }) }, controller.signal);
+      const reply = await this.options.run(task.consigne, { onTool: (label) => this.patch(id, { etapes: [...(this.get(id)?.etapes ?? []), label].slice(-30) }) }, controller.signal, { relecture: task.relecture === true });
       if (controller.signal.aborted) return;
       if (reply.error && !reply.text) this.patch(id, { etat: "echouee", erreur: reply.error, fin: new Date().toISOString() });
       else this.patch(id, { etat: "terminee", resultat: reply.text, fin: new Date().toISOString() });

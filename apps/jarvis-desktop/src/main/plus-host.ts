@@ -41,7 +41,7 @@ export function connectPlusHost(d: PlusHostDeps) {
     wake: wake ?? (null as unknown as WakeUp),
     spotify: spotifyHelpers,
     tasks,
-    launchTask: (titre, consigne, page) => tasks.launch(titre, mask(consigne), page).id,
+    launchTask: (titre, consigne, page, relecture) => tasks.launch(titre, mask(consigne), page, relecture === true).id,
     launchResearch,
     literature,
     library,

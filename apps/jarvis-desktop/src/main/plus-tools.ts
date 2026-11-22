@@ -47,7 +47,7 @@ export interface PlusHost {
     addCurrentToWake: () => Promise<string>;
   };
   tasks: BackgroundTasks;
-  launchTask: (titre: string, consigne: string, page?: "travail" | "rd" | "code" | "accueil") => string;
+  launchTask: (titre: string, consigne: string, page?: "travail" | "rd" | "code" | "accueil", relecture?: boolean) => string;
   launchResearch: (sujet: string, objectif: string | undefined, profondeur: "rapide" | "normale" | "poussee") => string;
   literature: Literature;
   library: Library;
@@ -167,8 +167,8 @@ export function plusTools(h: PlusHost) {
     sdkTool(
       "tache_lancer",
       "Lance une mission longue en tâche de fond (analyse de nombreux fichiers, projet complet, longue préparation) : tu réponds tout de suite à Alex, et la tâche s'annonce quand elle est finie. La consigne doit être complète et autonome (la tâche ne voit pas cette conversation).",
-      { titre: z.string(), consigne: z.string(), page: z.enum(["travail", "rd", "code", "accueil"]).optional() },
-      safe(async ({ titre, consigne, page }) => text(`Tâche lancée (${h.launchTask(titre, consigne, page)}).`)),
+      { titre: z.string(), consigne: z.string(), page: z.enum(["travail", "rd", "code", "accueil"]).optional(), relecture: z.boolean().optional().describe("true pour un travail important (code, analyse, rapport) : un second agent, en lecture seule, le relit avant de te le rendre, et le premier corrige ce qui est signalé.") },
+      safe(async ({ titre, consigne, page, relecture }) => text(`Tâche lancée (${h.launchTask(titre, consigne, page, relecture)})${relecture ? " avec relecture par un second agent" : ""}.`)),
     ),
     sdkTool("taches_lister", "Tâches de fond : en cours, finies (avec leur résultat), échouées.", { nombre: z.number().int().min(1).max(30).optional() }, safe(async ({ nombre }) => text(h.tasks.list(nombre ?? 10).map((t) => ({ ...t, resultat: t.resultat?.slice(0, 2000) })))), RO),
     sdkTool("tache_annuler", "Arrête une tâche de fond.", { id: z.string() }, safe(async ({ id }) => text(h.tasks.cancel(id) ? "Annulée." : "Introuvable ou déjà finie."))),

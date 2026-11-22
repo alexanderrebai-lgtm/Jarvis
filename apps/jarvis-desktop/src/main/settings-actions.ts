@@ -16,10 +16,10 @@ import type { JarvisServices } from "./main.js";
  * Boutons de la page Réglages : tester la météo, les ampoules, les caméras, Telegram ; connecter Google, Spotify, Claude ; installer la voix locale ; sauvegarder, restaurer, chercher une mise à jour.
  */
 
-export type SettingActionsDeps = Pick<JarvisServices, "agenda" | "backups" | "checkUpdates" | "conversation" | "env" | "envFile" | "handleCommand" | "host" | "localAI" | "localVoice" | "phone" | "planning" | "reply" | "say" | "settings" | "spotifyHelpers" | "tapo" | "tapoCache" | "vault" | "wake" | "weather" | "workspace">;
+export type SettingActionsDeps = Pick<JarvisServices, "healthConnexion" | "satelliteConnexion" | "agenda" | "backups" | "checkUpdates" | "conversation" | "env" | "envFile" | "handleCommand" | "host" | "localAI" | "localVoice" | "phone" | "planning" | "reply" | "say" | "settings" | "spotifyHelpers" | "tapo" | "tapoCache" | "vault" | "wake" | "weather" | "workspace">;
 
 export function createSettingActions(d: SettingActionsDeps) {
-  const { agenda, backups, checkUpdates, conversation, env, envFile, handleCommand, host, localAI, localVoice, phone, planning, reply, say, settings, spotifyHelpers, tapo, tapoCache, vault, wake, weather, workspace } = d;
+  const { healthConnexion, satelliteConnexion, agenda, backups, checkUpdates, conversation, env, envFile, handleCommand, host, localAI, localVoice, phone, planning, reply, say, settings, spotifyHelpers, tapo, tapoCache, vault, wake, weather, workspace } = d;
   /** Une image d'une caméra (pour le bouton « Tester »). */
   function grabCameraFrame(ip: string, user: string, password: string): Promise<string | undefined> {
     const bin = (ffmpegPath as unknown as string | null) ?? undefined;
@@ -159,6 +159,16 @@ export function createSettingActions(d: SettingActionsDeps) {
         }
         case "mise-a-jour":
           return { ok: true, message: await checkUpdates() };
+        case "sante-adresse": {
+          const c = healthConnexion();
+          if (!c.active) return { ok: false, message: "La réception est désactivée : mets « Oui » à « Recevoir mes données de santé », enregistre, puis redémarre Jarvis." };
+          return { ok: true, message: `Dans l'appli du téléphone, envoie (POST JSON) vers ${c.url} avec l'en-tête x-jeton: ${c.jeton}.${c.urlDistante ? ` De n'importe où (Tailscale) : ${c.urlDistante}.` : ""} Même Wi-Fi requis sans Tailscale.` };
+        }
+        case "satellite-adresse": {
+          const c = satelliteConnexion();
+          if (!c.active) return { ok: false, message: "Les satellites sont désactivés : mets « Oui » à « Accepter les micros des autres pièces », enregistre, puis redémarre Jarvis." };
+          return { ok: true, message: `Le micro envoie POST ${c.url} avec {"texte":"…","piece":"cuisine"} et l'en-tête x-jeton: ${c.jeton}. Il reçoit {"reponse":"…"} à dire. Droits : ${c.confiance === "proprietaire" ? "il peut agir comme toi" : "questions seulement"}.${c.urlDistante ? ` Hors de la maison (Tailscale) : ${c.urlDistante}.` : ""}` };
+        }
       }
       return { ok: false, message: "Action inconnue." };
     } catch (error) {

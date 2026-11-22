@@ -2,7 +2,7 @@ import { api, el, esc, panel } from "../common.js";
 import { buildPage, ICONS } from "../hud.js";
 
 interface Mesure { type: string; libelle: string; valeur: number; unite: string; instant: string }
-interface Connexion { active: boolean; url: string; jeton: string }
+interface Connexion { active: boolean; url: string; urlDistante: string | null; jeton: string }
 
 const when = (iso: string) => new Date(iso).toLocaleString("fr-FR", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
@@ -31,6 +31,7 @@ export function renderForme(root: HTMLElement): void {
     about.body.innerHTML = c.active
       ? `<p class="lead">Dans l'appli du téléphone, règle l'envoi (webhook / REST) vers :</p>
          <div class="forme-url"><code>${esc(c.url)}</code></div>
+         ${c.urlDistante ? `<p class="lead"><b>Depuis n'importe où</b> (Tailscale détecté) :</p><div class="forme-url"><code>${esc(c.urlDistante)}</code></div>` : `<p class="tip">Pour que ça marche aussi hors de la maison (4G, travail), installe <b>Tailscale</b> sur le PC et le téléphone : Jarvis affichera ici une adresse joignable de partout, sans ouvrir de port sur ta box.</p>`}
          <p class="lead">En-tête : <code>x-jeton: ${esc(c.jeton)}</code> (ou ajoute <code>?jeton=${esc(c.jeton)}</code> à l'adresse).</p>
          <p class="lead"><b>iPhone / Apple Santé</b> : appli « Health Auto Export » → automatisation « REST API », méthode POST, cette adresse.</p>
          <p class="lead"><b>Android / Huawei Watch 2</b> : les données passent par Health Connect (via l'appli Huawei Santé + un pont comme « Health Sync »), puis une appli qui envoie par webhook (ex. « Life Dashboard ») vers cette adresse.</p>

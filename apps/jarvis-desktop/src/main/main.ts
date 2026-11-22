@@ -67,6 +67,9 @@ import { connectPlusHost } from "./plus-host.js";
 import { SuiviVoiture } from "./voiture-suivi.js";
 import { UsageStore, jourLocal, phraseUsage } from "./usage.js";
 import { bilan, capacites, phraseCapacites } from "./capacites.js";
+import { adresseMaison, adresseTailscale } from "./reseau.js";
+import { SatelliteServer } from "./satellite.js";
+import { avecRelecture, promptRelecteur } from "./relecture.js";
 import { AmeliorationStore, revue as faireRevue } from "./amelioration.js";
 import { createRoutineRunner } from "./routine-runner.js";
 import { createIntentActions } from "./intent-actions.js";
@@ -627,14 +630,55 @@ function healthPort(): number {
   const p = Number(env("SANTE_PORT"));
   return Number.isInteger(p) && p > 1024 && p < 65536 ? p : 8896;
 }
+const networks = () => require("node:os").networkInterfaces() as import("./reseau.js").Interfaces;
 function lanAddress(): string {
-  const nets = require("node:os").networkInterfaces() as Record<string, Array<{ family: string; internal: boolean; address: string }> | undefined>;
-  for (const list of Object.values(nets)) for (const net of list ?? []) if (net.family === "IPv4" && !net.internal && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(net.address)) return net.address;
-  return "127.0.0.1";
+  return adresseMaison(networks()) ?? "127.0.0.1";
 }
-function healthConnexion(): { active: boolean; url: string; jeton: string } {
-  return { active: env("SANTE_ACTIVE") === "true", url: `http://${lanAddress()}:${healthPort()}/sante`, jeton: env("SANTE_ACTIVE") === "true" ? healthToken() : "" };
+function healthConnexion(): { active: boolean; url: string; urlDistante: string | null; jeton: string } {
+  const distante = adresseTailscale(networks());
+  return { active: env("SANTE_ACTIVE") === "true", url: `http://${lanAddress()}:${healthPort()}/sante`, urlDistante: distante ? `http://${distante}:${healthPort()}/sante` : null, jeton: env("SANTE_ACTIVE") === "true" ? healthToken() : "" };
 }
+// ---------- Satellites vocaux (micros des autres pièces) ----------
+let satelliteServer: SatelliteServer | undefined;
+const secretCache = new Map<string, string>();
+function secretToken(clef: string): string {
+  const cached = secretCache.get(clef);
+  if (cached) return cached;
+  const saved = vault.available ? vault.get(clef) : undefined;
+  const token = saved ?? (require("node:crypto").randomBytes(10).toString("hex") as string);
+  if (vault.available && !saved) vault.set(clef, token);
+  secretCache.set(clef, token);
+  return token;
+}
+function satellitePort(): number {
+  const p = Number(env("SATELLITE_PORT"));
+  return Number.isInteger(p) && p > 1024 && p < 65536 ? p : 8895;
+}
+function satelliteConnexion(): { active: boolean; url: string; urlDistante: string | null; jeton: string; confiance: string } {
+  const distante = adresseTailscale(networks());
+  const active = env("SATELLITE_ACTIF") === "true";
+  return { active, url: `http://${lanAddress()}:${satellitePort()}/demande`, urlDistante: distante ? `http://${distante}:${satellitePort()}/demande` : null, jeton: active ? secretToken("satellite-jeton") : "", confiance: env("SATELLITE_CONFIANCE") === "proprietaire" ? "proprietaire" : "inconnu" };
+}
+async function startSatellite(): Promise<void> {
+  if (env("SATELLITE_ACTIF") !== "true") return;
+  const agit = env("SATELLITE_CONFIANCE") === "proprietaire";
+  satelliteServer = new SatelliteServer({
+    port: satellitePort(),
+    token: secretToken("satellite-jeton"),
+    repondre: async (texte, piece) => {
+      const r = await brain.ask(
+        `[Demande vocale reçue d'un micro${piece ? ` dans la pièce « ${piece} »` : " d'une autre pièce"}. Réponds en une ou deux phrases courtes, à l'oral, en français, sans Markdown.]\n\n${texte}`,
+        {},
+        { separate: true, source: "satellite", ...(agit ? {} : { trust: "inconnu" as const }) },
+      );
+      journal.add({ demande: `(satellite${piece ? ` ${piece}` : ""}) ${unmask(texte)}`, reponse: unmask(r.text), outils: ["satellite"] });
+      return unmask(r.text);
+    },
+  });
+  const r = await satelliteServer.start();
+  if (!r.ok) console.warn("[satellite]", r.message);
+}
+
 async function startHealth(): Promise<void> {
   if (env("SANTE_ACTIVE") !== "true") return;
   healthServer = new HealthServer(healthStore, { port: healthPort(), token: healthToken(), onIngest: (n) => n && actions.add({ outil: "santé", resume: `${n} mesure(s) reçue(s) de la montre`, autorise: true, origine: "automatique" }) });
@@ -877,12 +921,21 @@ function stopSpeaking(): void {
 
 const tasks = new BackgroundTasks({
   dataDir: config.dataDir,
-  run: (consigne, events, signal) =>
-    brain.askDetached(
-      `[Tâche de fond lancée par Jarvis pour ${ownerName}. Personne ne peut te répondre pendant la tâche : ne pose pas de question, fais des hypothèses raisonnables et dis-les. Termine par un résumé de deux phrases à dire à voix haute.]\n\n${consigne}`,
-      { onTool: (name) => events.onTool(toolLabel(name)) },
-      signal,
-    ),
+  run: (consigne, events, signal, opts) => {
+    const travailler = (c: string) =>
+      brain.askDetached(
+        `[Tâche de fond lancée par Jarvis pour ${ownerName}. Personne ne peut te répondre pendant la tâche : ne pose pas de question, fais des hypothèses raisonnables et dis-les. Termine par un résumé de deux phrases à dire à voix haute.]\n\n${c}`,
+        { onTool: (name) => events.onTool(toolLabel(name)) },
+        signal,
+      );
+    if (!opts?.relecture) return travailler(consigne);
+    return avecRelecture(consigne, {
+      travailler,
+      // Le relecteur ne voit que des outils de lecture : il ne peut rien modifier.
+      relire: (c, resultat) => brain.askDetached(promptRelecteur(c, resultat), { onTool: (name) => events.onTool(toolLabel(name)) }, signal, { trust: "restreint", outils: ["Read", "Grep", "Glob"], source: "relecture" }),
+      etape: (libelle) => events.onTool(libelle),
+    });
+  },
   onUpdate: (list) => broadcast("taches:data", list.filter((t) => t.etat === "en_cours" || t.etat === "attente")),
   onDone: (task) => {
     const summary = (task.resultat ?? task.erreur ?? "").split(/\n\s*\n/).filter(Boolean).at(-1)?.slice(0, 400) ?? "";
@@ -1760,7 +1813,7 @@ function startConnectorGuard(): void {
 
 ipcMain.handle("memoire:lire", () => ({ faits: [...notes.memories()].reverse(), notes: notes.list(100), rappels: recall?.recents(8) ?? [] }));
 ipcMain.handle("rappel:retour", (_event, payload: { cle: string; avis: "utile" | "inutile" }) => (recall?.retour(payload.cle, payload.avis) ?? false) && { rappels: recall?.recents(8) ?? [] });
-const capaciteListe = () => capacites({ env, briefings: briefingStore.list().length, connecteurs: connectors.list().length, documentsBibliotheque: library.documents().length, motEveilActif: !!wakeEngine });
+const capaciteListe = () => capacites({ env, briefings: briefingStore.list().length, connecteurs: connectors.list().length, documentsBibliotheque: library.documents().length, motEveilActif: !!wakeEngine, connecteurNoms: connectors.list().map((x) => x.nom) });
 ipcMain.handle("ameliorations:lire", () => ({ propositions: ameliorations.liste(), derniereRevue: ameliorations.derniereRevue() ?? null }));
 ipcMain.handle("ameliorations:decider", (_event, payload: { id: string; accepte: boolean }) => {
   const p = ameliorations.decider(payload.id, payload.accepte, notes);
@@ -2036,6 +2089,7 @@ void app.whenReady().then(async () => {
   if (!startupTest) setTimeout(welcomeOnce, 90_000);
   startScreenWatch();
   void startHealth();
+  void startSatellite();
   if (!startupTest) {
     watchdog.start();
     setTimeout(() => void checkLastShutdown().catch((e) => console.warn("[santé]", e)), 2 * 60_000);
@@ -2076,6 +2130,7 @@ app.on("will-quit", () => {
   watchdog.stop();
   recall?.stop();
   healthServer?.stop();
+  satelliteServer?.stop();
   globalShortcut.unregisterAll();
   race.stop();
   security.stop();
@@ -2131,6 +2186,8 @@ export interface JarvisServices {
   host: typeof host;
   lab: typeof lab;
   launchResearch: typeof launchResearch;
+  healthConnexion: typeof healthConnexion;
+  satelliteConnexion: typeof satelliteConnexion;
   launchRoutine: typeof launchRoutine;
   learning: typeof learning;
   library: typeof library;
@@ -2191,7 +2248,7 @@ export interface JarvisServices {
 
 const diagnostics = createDiagnostics({ localAI, ears, env, localVoice, voice, voiceLock, agenda, tapo, security, phone, spotify, planning, wake, backups, vault, lab, library, micro, perf, secretCopyDate, wakeWordStatus, senses: () => senses, updateStatus: () => updates.status, gpuPreferenceNote: () => pcCare.gpuNote(), hardware: () => hardware, tuning: () => tuning, movedSecrets: () => movedSecrets });
 
-const settingActions = createSettingActions({ agenda, backups, checkUpdates, conversation, env, envFile, handleCommand, host, localAI, localVoice, phone, planning, reply, say, settings, spotifyHelpers, tapo, tapoCache, vault, wake, weather, workspace });
+const settingActions = createSettingActions({ healthConnexion, satelliteConnexion, agenda, backups, checkUpdates, conversation, env, envFile, handleCommand, host, localAI, localVoice, phone, planning, reply, say, settings, spotifyHelpers, tapo, tapoCache, vault, wake, weather, workspace });
 
 const pcCare = createPcCare({ actions, brain, broadcast, config, ears, env, flags, games, host, localAI, localVoice, ownerName, pages, perf, race, updateTray, workspace, hardware: () => hardware, tuning: () => tuning });
 

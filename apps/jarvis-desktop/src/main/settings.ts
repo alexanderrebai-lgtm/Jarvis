@@ -201,6 +201,17 @@ export const SETTING_GROUPS: SettingGroup[] = [
     ],
   },
   {
+    id: "satellites",
+    titre: "Micros des autres pièces",
+    description: "Un micro dans la cuisine ou la chambre (module ESP32, Home Assistant Voice, un téléphone) envoie ce que tu dis à Jarvis et lit sa réponse. Jarvis ne fournit que le cerveau : le micro fait la reconnaissance et la voix. Protégé par un jeton ; par défaut, ces micros ne peuvent que poser des questions.",
+    champs: [
+      { cle: "SATELLITE_ACTIF", libelle: "Accepter les micros des autres pièces", type: "choix", options: [{ valeur: "false", libelle: "Non (par défaut)" }, { valeur: "true", libelle: "Oui" }], redemarrage: true },
+      { cle: "SATELLITE_CONFIANCE", libelle: "Ce que ces micros ont le droit de faire", type: "choix", options: [{ valeur: "inconnu", libelle: "Questions seulement (conseillé) : pas d'action sur la maison, le PC ou les mails" }, { valeur: "proprietaire", libelle: "Agir comme si c'était toi (la voix n'est pas vérifiée à distance)" }], redemarrage: true, aide: "Jarvis ne peut pas reconnaître ta voix à travers un micro distant. Si quelqu'un peut parler près du micro (invité, télé), garde « Questions seulement »." },
+      { cle: "SATELLITE_PORT", libelle: "Port d'écoute (avancé)", type: "nombre", exemple: "8895", redemarrage: true },
+    ],
+    actions: [{ id: "satellite-adresse", libelle: "Voir l'adresse pour le micro" }],
+  },
+  {
     id: "cout",
     titre: "Coût de Claude",
     description: "Jarvis compte chaque appel à Claude (page « Coût ») et te dit ce qui consomme. Les tâches qu'il fait tout seul — surveillance d'écran, briefings, mails importants — tournent en continu : un plafond par jour évite les surprises.",

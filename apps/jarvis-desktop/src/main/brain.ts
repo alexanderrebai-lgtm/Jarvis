@@ -101,10 +101,10 @@ export class Brain {
   }
 
   /** Tâche de fond : tourne à côté de la conversation, sans l'attendre ni la bloquer. */
-  askDetached(prompt: string, events: BrainEvents, signal: AbortSignal): Promise<BrainReply> {
+  askDetached(prompt: string, events: BrainEvents, signal: AbortSignal, opts: { trust?: PolicyContext["trust"]; outils?: string[]; source?: string } = {}): Promise<BrainReply> {
     const abort = new AbortController();
     signal.addEventListener("abort", () => abort.abort(), { once: true });
-    return this.run(prompt, events, true, abort, "proprietaire", undefined, "tâche de fond");
+    return this.run(prompt, events, true, abort, opts.trust ?? "proprietaire", opts.outils, opts.source ?? "tâche de fond");
   }
 
   /** « Stop » : interrompt la tâche en cours. */
