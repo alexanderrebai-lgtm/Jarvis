@@ -137,7 +137,7 @@ export function renderHome(root: HTMLElement): void {
   });
   api.on("jarvis:heard", ({ transcript, awake, bip }: { transcript: string; awake: boolean; bip?: boolean }) => {
     if (!awake) return;
-    heard.textContent = `« ${transcript} »`;
+    if (transcript) heard.textContent = `« ${transcript} »`;
     if (bip) playChime();
   });
 

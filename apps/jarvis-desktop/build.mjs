@@ -9,7 +9,7 @@ mkdirSync(path.join(out, "renderer"), { recursive: true });
 
 // Modules natifs ou qui lancent un programme externe : chargés depuis node_modules, pas empaquetés.
 // Chacun doit figurer dans les « dependencies » de ce paquet pour être trouvé au lancement.
-const external = ["electron", "@anthropic-ai/claude-agent-sdk", "@huggingface/transformers", "playwright", "tp-link-tapo-connect", "ffmpeg-static", "systeminformation", "pdfjs-dist", "exceljs", "mammoth", "electron-updater"];
+const external = ["electron", "@anthropic-ai/claude-agent-sdk", "@huggingface/transformers", "playwright", "tp-link-tapo-connect", "ffmpeg-static", "systeminformation", "pdfjs-dist", "exceljs", "mammoth", "electron-updater", "onnxruntime-node"];
 
 await build({
   entryPoints: { main: "src/main/main.ts", preload: "src/main/preload.ts" },

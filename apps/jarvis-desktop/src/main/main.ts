@@ -66,6 +66,7 @@ import { connectPlusHost } from "./plus-host.js";
 import { createRoutineRunner } from "./routine-runner.js";
 import { createIntentActions } from "./intent-actions.js";
 import { Updates } from "./updates.js";
+import { WakeWordEngine } from "./wake-word.js";
 import { MusicPanel } from "./music-panel.js";
 import { createPcCare } from "./pc-care.js";
 import { createSettingActions } from "./settings-actions.js";
@@ -175,7 +176,7 @@ const tools: ToolContext = { mail, agenda, notes, pending, inbox, browser, home,
 let bubble: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let quitting = false;
-const flags = { micro: true, cameras: true, doNotDisturb: false, speaking: false, surveillance: "off" as SurveillanceMode, jeu: false };
+const flags = { micro: true, cameras: true, doNotDisturb: false, speaking: false, surveillance: "off" as SurveillanceMode, jeu: false, eveil: false };
 
 function rendererUrl(page: string): string {
   return `file://${path.join(__dirname, "renderer", "index.html").replace(/\\/g, "/")}?page=${page}`;
@@ -1256,6 +1257,53 @@ function toolLabel(name: string): string {
 
 // ---------- Messages de l'interface ----------
 
+// ---------- Mot d'éveil « Hey Jarvis » ----------
+
+let wakeEngine: WakeWordEngine | undefined;
+let wakeError: string | undefined;
+/** Dernière fois que « Hey Jarvis » a été entendu : la phrase qui suit est transcrite. */
+let lastWakeAt = 0;
+const WAKE_FOLLOW_MS = 12_000;
+const wakeThreshold = () => {
+  const v = Number((env("EVEIL_SEUIL") ?? "0.5").replace(",", "."));
+  return Number.isFinite(v) && v > 0 && v < 1 ? v : 0.5;
+};
+
+/** Active (ou coupe) l'écoute du mot d'éveil selon le réglage ; sans modèle, Jarvis revient à « son nom dans la phrase ». */
+async function startWakeWord(): Promise<void> {
+  const wanted = (env("ECOUTE_MODE") ?? "hey-jarvis") === "hey-jarvis";
+  if (wanted) {
+    try {
+      wakeEngine ??= await WakeWordEngine.load(path.join(assets, "eveil"), { threshold: wakeThreshold() });
+      wakeEngine.threshold = wakeThreshold();
+      wakeError = undefined;
+    } catch (error) {
+      wakeError = error instanceof Error ? error.message : String(error);
+      console.warn("[mot d'éveil]", error);
+    }
+  }
+  flags.eveil = wanted && Boolean(wakeEngine) && !wakeError;
+  broadcast("jarvis:flags", flags);
+}
+
+function wakeWordStatus(): { actif: boolean; detail: string } {
+  if ((env("ECOUTE_MODE") ?? "hey-jarvis") !== "hey-jarvis") return { actif: false, detail: "Réglé sur « son nom dans la phrase » : tout ce qui est entendu est transcrit." };
+  if (wakeError) return { actif: false, detail: `Modèle du mot d'éveil non chargé (${wakeError}) : Jarvis écoute son nom dans la phrase en attendant.` };
+  return { actif: flags.eveil, detail: flags.eveil ? `« Hey Jarvis » actif (seuil ${wakeThreshold()}). Rien n'est transcrit tant qu'il n'est pas entendu.` : "Chargement…" };
+}
+
+ipcMain.on("audio:flux", (_event, chunk: Int16Array) => {
+  if (!flags.micro || !flags.eveil || !wakeEngine) return;
+  wakeEngine.push(chunk instanceof Int16Array ? chunk : Int16Array.from(chunk as ArrayLike<number>), () => {
+    lastWakeAt = Date.now();
+    // « Hey Jarvis » coupe aussi Jarvis s'il est en train de parler.
+    if (flags.speaking) stopSpeaking();
+    conversation.open();
+    setState("ecoute");
+    broadcast("jarvis:heard", { transcript: "", awake: true, bip: env("ECOUTE_SON") !== "false" });
+  });
+});
+
 ipcMain.on("audio:utterance", async (_event, payload: Float32Array | { samples: Float32Array; pendantParole?: boolean }) => {
   if (!flags.micro) return;
   const samples = payload instanceof Float32Array ? payload : payload.samples;
@@ -1271,6 +1319,9 @@ ipcMain.on("audio:utterance", async (_event, payload: Float32Array | { samples: 
       }
       return;
     }
+    // Avec « Hey Jarvis » : une phrase qui ne suit pas le mot d'éveil (ni une réponse) n'est même pas transcrite.
+    const recentWake = Date.now() - lastWakeAt < WAKE_FOLLOW_MS;
+    if (flags.eveil && !duringSpeech && !procedures.isRecording && !wake?.ringing && !conversation.active && !recentWake) return;
     if (!duringSpeech) setState("ecoute", "transcription");
     const [transcript, identity] = await Promise.all([ears.transcribe(samples), voiceLock.verify(samples).catch(() => ({ owner: true, score: undefined, reason: "erreur" }))]);
     const trust = identity.owner ? "proprietaire" : "inconnu";
@@ -1299,10 +1350,11 @@ ipcMain.on("audio:utterance", async (_event, payload: Float32Array | { samples: 
         return setState("veille");
       }
     }
-    const result = detectWake(transcript, conversation.active, wakeNames());
+    const result = detectWake(transcript, conversation.active || recentWake, wakeNames());
+    if (result.awake) lastWakeAt = 0;
     // Discrétion : ce qui n'est pas adressé à Jarvis n'est ni affiché ni gardé.
     if (!result.awake) return setState("veille");
-    broadcast("jarvis:heard", { transcript: unmask(transcript), awake: true, voix: identity.owner ? "Alex" : "inconnue", bip: env("ECOUTE_SON") !== "false" && !conversation.active });
+    broadcast("jarvis:heard", { transcript: unmask(transcript), awake: true, voix: identity.owner ? "Alex" : "inconnue", bip: env("ECOUTE_SON") !== "false" && !conversation.active && !flags.eveil });
     if (!result.command) {
       conversation.open();
       say(pickGreeting());
@@ -1482,6 +1534,8 @@ function applySettings(keys: string[]): void {
   if (keys.includes("JARVIS_VILLE")) void weather.setCity(env("JARVIS_VILLE"));
   if (keys.includes("VOIX_MOTEUR") && env("VOIX_MOTEUR") === "locale" && localVoice.installed && !flags.jeu) void localVoice.start();
   if (keys.includes("MODE_JEU")) updateGameMode();
+  if (keys.includes("ECOUTE_MODE")) void startWakeWord();
+  if (keys.includes("EVEIL_SEUIL") && wakeEngine) wakeEngine.threshold = wakeThreshold();
   if (keys.includes("GPU_INTERFACE")) void applyGpuPreference();
   if (keys.includes("VOIX_SEUIL") && env("VOIX_SEUIL")) voiceLock.setThreshold(Number(env("VOIX_SEUIL")!.replace(",", ".")));
   if (keys.some((k) => k.startsWith("REVEIL") || k.startsWith("PLANNING"))) void wake?.refresh();
@@ -1563,7 +1617,7 @@ void app.whenReady().then(async () => {
       setTimeout(async () => {
         const diag = await runDiagnostic().catch((error) => fail(`diagnostic : ${error instanceof Error ? error.message : error}`));
         if (!diag) return;
-        const ok = `[test] démarrage OK — version ${app.getVersion()}, ${diag.length} contrôles du diagnostic exécutés`;
+        const ok = `[test] démarrage OK — version ${app.getVersion()}, ${diag.length} contrôles du diagnostic exécutés, mot d'éveil ${wakeWordStatus().actif ? "actif" : `inactif (${wakeWordStatus().detail})`}`;
         console.log(ok);
         writeFileSync(path.join(workspace, "test-demarrage.txt"), ok);
         quitting = true;
@@ -1605,6 +1659,7 @@ void app.whenReady().then(async () => {
   learnTeam();
   await chooseSpeechModel();
   ears.warmUp();
+  void startWakeWord();
   weather.start();
   perf.start();
   games.start();
@@ -1697,6 +1752,7 @@ app.on("window-all-closed", () => undefined);
 
 
 
+
 /** Services partagés avec les modules de Jarvis (chaque module reçoit seulement ceux dont il a besoin). */
 export interface JarvisServices {
   actions: typeof actions;
@@ -1775,12 +1831,13 @@ export interface JarvisServices {
   voice: typeof voice;
   voiceLock: typeof voiceLock;
   wake: typeof wake;
+  wakeWordStatus: typeof wakeWordStatus;
   weather: typeof weather;
   workFolder: typeof workFolder;
   workspace: typeof workspace;
 }
 
-const diagnostics = createDiagnostics({ localAI, ears, env, localVoice, voice, voiceLock, agenda, tapo, security, phone, spotify, planning, wake, backups, vault, lab, library, micro, perf, secretCopyDate, senses: () => senses, updateStatus: () => updates.status, gpuPreferenceNote: () => pcCare.gpuNote(), hardware: () => hardware, tuning: () => tuning, movedSecrets: () => movedSecrets });
+const diagnostics = createDiagnostics({ localAI, ears, env, localVoice, voice, voiceLock, agenda, tapo, security, phone, spotify, planning, wake, backups, vault, lab, library, micro, perf, secretCopyDate, wakeWordStatus, senses: () => senses, updateStatus: () => updates.status, gpuPreferenceNote: () => pcCare.gpuNote(), hardware: () => hardware, tuning: () => tuning, movedSecrets: () => movedSecrets });
 
 const settingActions = createSettingActions({ agenda, backups, checkUpdates, conversation, env, envFile, handleCommand, host, localAI, localVoice, phone, planning, reply, say, settings, spotifyHelpers, tapo, tapoCache, vault, wake, weather, workspace });
 

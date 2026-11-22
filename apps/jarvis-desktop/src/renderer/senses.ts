@@ -8,7 +8,7 @@ import { api, setCoreLevel } from "./common.js";
  * micro (voix et claquements), voix de Jarvis, webcams et gestes.
  */
 
-export const flags = { micro: true, cameras: true, doNotDisturb: false };
+export const flags = { micro: true, cameras: true, doNotDisturb: false, eveil: false };
 const sensesState = { micro: false, cameras: 0, gestes: false, detecteur: false };
 function reportSenses(change: Partial<typeof sensesState>): void {
   Object.assign(sensesState, change);
@@ -105,6 +105,9 @@ api.on("audio:stop", () => {
 
 // ---------- Micro ----------
 
+const wakeBuffer: Float32Array[] = [];
+let wakeLength = 0;
+
 export async function startMicrophone(): Promise<void> {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   const ctx = new AudioContext();
@@ -125,6 +128,21 @@ export async function startMicrophone(): Promise<void> {
       let peak = 0;
       for (let i = 0; i < frame.length; i += 1) peak = Math.max(peak, Math.abs(frame[i]!));
       setCoreLevel(peak * 2);
+    }
+    // Mot d'éveil : le son part par blocs de 80 ms vers le détecteur « Hey Jarvis » (très léger).
+    if (flags.eveil) {
+      wakeBuffer.push(frame);
+      wakeLength += frame.length;
+      if (wakeLength >= 1280) {
+        const chunk = new Int16Array(wakeLength);
+        let o = 0;
+        for (const part of wakeBuffer) {
+          for (let i = 0; i < part.length; i++) chunk[o++] = Math.max(-32768, Math.min(32767, Math.round(part[i]! * 32767)));
+        }
+        wakeBuffer.length = 0;
+        wakeLength = 0;
+        api.send("audio:flux", chunk);
+      }
     }
     const utterance = vad.push(frame);
     if (utterance) api.send("audio:utterance", { samples: utterance, pendantParole: Boolean(playing) });

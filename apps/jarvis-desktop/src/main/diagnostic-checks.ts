@@ -8,7 +8,7 @@ import type { JarvisServices } from "./main.js";
  * Bilan de santé de Jarvis : chaque organe (cerveau, voix, sens, services, maison, réveil, données, recherche, PC) est vérifié et un conseil est proposé.
  */
 
-export type DiagnosticsDeps = Pick<JarvisServices, "localAI" | "ears" | "env" | "localVoice" | "voice" | "voiceLock" | "agenda" | "tapo" | "security" | "phone" | "spotify" | "planning" | "wake" | "backups" | "vault" | "lab" | "library" | "micro" | "perf" | "secretCopyDate"> & {
+export type DiagnosticsDeps = Pick<JarvisServices, "localAI" | "ears" | "env" | "localVoice" | "voice" | "voiceLock" | "agenda" | "tapo" | "security" | "phone" | "spotify" | "planning" | "wake" | "backups" | "vault" | "lab" | "library" | "micro" | "perf" | "secretCopyDate" | "wakeWordStatus"> & {
   senses: () => JarvisServices["senses"];
   updateStatus: () => string;
   gpuPreferenceNote: () => string;
@@ -18,7 +18,7 @@ export type DiagnosticsDeps = Pick<JarvisServices, "localAI" | "ears" | "env" | 
 };
 
 export function createDiagnostics(d: DiagnosticsDeps) {
-  const { localAI, ears, env, localVoice, voice, voiceLock, agenda, tapo, security, phone, spotify, planning, wake, backups, vault, lab, library, micro, perf, secretCopyDate, senses, updateStatus, gpuPreferenceNote, hardware, tuning, movedSecrets } = d;
+  const { localAI, ears, env, localVoice, voice, voiceLock, agenda, tapo, security, phone, spotify, planning, wake, backups, vault, lab, library, micro, perf, secretCopyDate, wakeWordStatus, senses, updateStatus, gpuPreferenceNote, hardware, tuning, movedSecrets } = d;
   async function runDiagnostic() {
     const checks: Check[] = [
       { id: "claude", groupe: "Cerveau", titre: "Connexion à Claude", run: () => {
@@ -41,7 +41,11 @@ export function createDiagnostics(d: DiagnosticsDeps) {
         }
         return { etat: voice.mode === "en ligne" ? "ok" : "attention", detail: voice.mode === "en ligne" ? "Voix neuronale Microsoft en ligne." : `Voix de secours Windows (${voice.lastError ?? "voix en ligne injoignable"}).` };
       } },
-      { id: "empreinte", groupe: "Voix", titre: "Verrou vocal", run: () => (voiceLock.enrolled ? { etat: "ok", detail: `Ta voix est enregistrée (seuil ${voiceLock.threshold}).` } : { etat: "attention", detail: "Pas d'empreinte : n'importe quelle voix peut commander Jarvis.", conseil: "Dis « Jarvis, apprends ma voix » et répète les cinq phrases.", action: { libelle: "Apprendre ma voix", commande: "apprends ma voix" } }) },
+      { id: "mot-eveil", groupe: "Voix", titre: "Mot d'éveil", run: () => {
+        const w = wakeWordStatus();
+        return { etat: w.actif ? "ok" : "attention", detail: w.detail, ...(w.actif ? {} : { action: { libelle: "Réglages de l'écoute", reglages: "voix" } }) };
+      } },
+    { id: "empreinte", groupe: "Voix", titre: "Verrou vocal", run: () => (voiceLock.enrolled ? { etat: "ok", detail: `Ta voix est enregistrée (seuil ${voiceLock.threshold}).` } : { etat: "attention", detail: "Pas d'empreinte : n'importe quelle voix peut commander Jarvis.", conseil: "Dis « Jarvis, apprends ma voix » et répète les cinq phrases.", action: { libelle: "Apprendre ma voix", commande: "apprends ma voix" } }) },
       { id: "micro", groupe: "Sens", titre: "Micro et caméras", run: () => ({ etat: senses().micro ? "ok" : "erreur", detail: `Micro ${senses().micro ? "actif" : "indisponible"} · ${senses().cameras} webcam(s) · gestes ${senses().gestes ? "actifs" : "inactifs"} · détecteur de personne ${senses().detecteur ? "prêt" : "non chargé"}`, ...(senses().micro ? {} : { conseil: "Paramètres Windows → Confidentialité → Microphone : autorise les applications de bureau." }) }) },
       { id: "google", groupe: "Services", titre: "Gmail et Agenda", run: async () => (agenda ? await agenda.list(new Date(), new Date(Date.now() + 3_600_000)).then(() => ({ etat: "ok" as const, detail: "Connecté." }), (error: unknown) => ({ etat: "erreur" as const, detail: explainGoogle(error instanceof Error ? error.message : String(error)), conseil: "Réglages → Gmail et Google Agenda → « Se connecter avec Google ».", action: { libelle: "Reconnecter Google", reglages: "google" } })) : { etat: "absent" as const, detail: "Non configuré.", conseil: "Page Réglages → Gmail et Google Agenda.", action: { libelle: "Relier Google", reglages: "google" } }) },
       { id: "tapo", groupe: "Maison", titre: "Ampoules et prises Tapo", run: async () => {

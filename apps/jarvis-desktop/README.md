@@ -300,6 +300,10 @@ Au démarrage, Jarvis lit le matériel (page Diagnostic → Profil matériel) et
 - modèle de la bibliothèque libéré après 5 minutes sans recherche ;
 - processeur à puce graphique intégrée (Ryzen « G ») : l'interface de Jarvis peut tourner dessus, la carte NVIDIA reste aux jeux et à l'IA (Réglages → Toi et ta ville ; la puce doit être activée dans le BIOS).
 
+## « Hey Jarvis » (mot d'éveil)
+
+Par défaut, un petit détecteur (modèles openWakeWord : code Apache 2.0, modèles pré-entraînés CC BY-NC-SA 4.0, usage personnel) écoute seulement « Hey Jarvis », par blocs de 80 ms : environ 25 ms de calcul par seconde de son, sur un seul cœur. Tant qu'il n'a pas entendu le mot, **rien n'est transcrit** : la reconnaissance vocale (Whisper) dort, et une phrase de la télé ou d'une conversation ne réveille plus Jarvis. « Hey Jarvis » coupe aussi Jarvis s'il est en train de parler. Réglages → Voix et oreilles : « Comment réveiller Jarvis » (ou revenir à « son nom dans la phrase ») et sensibilité.
+
 ## Mot d'éveil, mode absent et journal
 
 - **Son nom** : Jarvis n'agit que si une phrase contient « Jarvis » (ou juste après une réponse). Ce qui ne lui est pas adressé n'est ni affiché ni gardé. Réglages → Voix et oreilles : autres noms, durée d'écoute de la suite (0 = toujours dire son nom), petit son quand il t'entend.
