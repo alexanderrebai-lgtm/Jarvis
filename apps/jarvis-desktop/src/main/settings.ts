@@ -201,6 +201,15 @@ export const SETTING_GROUPS: SettingGroup[] = [
     ],
   },
   {
+    id: "cout",
+    titre: "Coût de Claude",
+    description: "Jarvis compte chaque appel à Claude (page « Coût ») et te dit ce qui consomme. Les tâches qu'il fait tout seul — surveillance d'écran, briefings, mails importants — tournent en continu : un plafond par jour évite les surprises.",
+    champs: [
+      { cle: "USAGE_PLAFOND_JOUR", libelle: "Plafond par jour (en dollars, 0 = aucun)", type: "nombre", exemple: "2", aide: "Avec un abonnement, c'est un équivalent (rien n'est facturé) qui sert de repère. Jarvis te prévient à 80 % puis à 100 %." },
+      { cle: "USAGE_PAUSE_AUTO", libelle: "Au plafond, mettre en pause ce que Jarvis fait tout seul", type: "choix", options: [{ valeur: "on", libelle: "Oui : écran, briefings et mails attendent demain (conseillé)" }, { valeur: "off", libelle: "Non : alerte seulement" }], aide: "Tu peux toujours lui parler : seule la consommation automatique s'arrête." },
+    ],
+  },
+  {
     id: "sauvegardes",
     titre: "Sauvegardes et mises à jour",
     description: "Une sauvegarde est faite chaque nuit dans Documents\\Jarvis\\sauvegardes ; tu peux en envoyer une copie ailleurs.",

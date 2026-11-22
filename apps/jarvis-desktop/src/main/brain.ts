@@ -62,6 +62,8 @@ export interface BrainOptions {
   onDecision?: (tool: string, input: Record<string, unknown>, allowed: boolean, reason: string | undefined, trust: PolicyContext["trust"]) => void;
   /** Juste avant qu'un outil modifie un fichier (pour en garder une copie). */
   beforeFileChange?: (file: string) => void;
+  /** Après chaque appel à Claude : coût et jetons, avec la source (pour le compteur d'usage). */
+  onUsage?: (usage: { source: string; usd?: number | undefined; entree?: number | undefined; sortie?: number | undefined }) => void;
 }
 
 export interface AskOptions {
@@ -71,6 +73,8 @@ export interface AskOptions {
   trust?: PolicyContext["trust"];
   /** Avec trust « restreint » : la liste exacte des outils permis (vide = aucun). */
   outils?: string[];
+  /** D'où vient la demande (« surveillance d'écran », « briefings »…), pour le compteur d'usage. */
+  source?: string;
 }
 
 export class Brain {
@@ -90,7 +94,7 @@ export class Brain {
 
   /** Une demande à la fois ; la suivante attend (comme une vraie conversation). */
   ask(prompt: string, events: BrainEvents = {}, opts: AskOptions = {}): Promise<BrainReply> {
-    const run = () => this.run(prompt, events, opts.separate === true || opts.trust === "inconnu" || opts.trust === "restreint", undefined, opts.trust, opts.outils);
+    const run = () => this.run(prompt, events, opts.separate === true || opts.trust === "inconnu" || opts.trust === "restreint", undefined, opts.trust, opts.outils, opts.source ?? (opts.separate || opts.trust ? "autre" : "conversation"));
     const next = this.queue.catch(() => undefined).then(run);
     this.queue = next;
     return next;
@@ -100,7 +104,7 @@ export class Brain {
   askDetached(prompt: string, events: BrainEvents, signal: AbortSignal): Promise<BrainReply> {
     const abort = new AbortController();
     signal.addEventListener("abort", () => abort.abort(), { once: true });
-    return this.run(prompt, events, true, abort);
+    return this.run(prompt, events, true, abort, "proprietaire", undefined, "tâche de fond");
   }
 
   /** « Stop » : interrompt la tâche en cours. */
@@ -113,7 +117,7 @@ export class Brain {
     this.state.write({});
   }
 
-  private async run(prompt: string, events: BrainEvents, separate: boolean, external?: AbortController, trust: PolicyContext["trust"] = "proprietaire", outils?: string[]): Promise<BrainReply> {
+  private async run(prompt: string, events: BrainEvents, separate: boolean, external?: AbortController, trust: PolicyContext["trust"] = "proprietaire", outils?: string[], source = "conversation"): Promise<BrainReply> {
     const session = separate ? {} : this.state.read();
     const abort = external ?? new AbortController();
     if (!external) this.current = abort;
@@ -169,6 +173,8 @@ export class Brain {
     let text = "";
     let finalText = "";
     let costUsd: number | undefined;
+    let jetonsEntree: number | undefined;
+    let jetonsSortie: number | undefined;
     let error: string | undefined;
     try {
       for await (const message of this.options.queryFn ? this.options.queryFn({ prompt, options }) : sdkQuery({ prompt, options })) {
@@ -178,10 +184,14 @@ export class Brain {
         }
         if (message.type === "result") {
           costUsd = "total_cost_usd" in message ? (message.total_cost_usd as number) : undefined;
+          const u = (message as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+          jetonsEntree = u?.input_tokens;
+          jetonsSortie = u?.output_tokens;
           if (message.subtype === "success") finalText = message.result;
           else error = message.subtype;
         }
       }
+      this.options.onUsage?.({ source, usd: costUsd, entree: jetonsEntree, sortie: jetonsSortie });
     } catch (caught) {
       if (abort.signal.aborted) return { text: "D'accord, j'arrête.", ...(costUsd !== undefined ? { costUsd } : {}) };
       error = caught instanceof Error ? caught.message : String(caught);

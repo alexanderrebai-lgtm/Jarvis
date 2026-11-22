@@ -510,3 +510,15 @@ body.mode-jeu *, body.mode-jeu *::before, body.mode-jeu *::after { animation-pla
 .forme-tuile small { color: var(--muted); font-size: 11px; }
 .forme-url { margin: 8px 0; }
 .forme-url code, .health-pane code { background: rgba(0,0,0,0.35); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; font-size: 12px; overflow-wrap: anywhere; }
+
+/* ---------- Coût de Claude ---------- */
+.cout-jauge { height: 8px; margin: 10px 4px 2px; border-radius: 6px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.cout-jauge i { display: block; height: 100%; background: var(--hud-strong); }
+.cout-jauge i.warn { background: #f5c451; }
+.cout-jauge i.bad { background: #ff6b6b; }
+.cout-barres { display: flex; align-items: flex-end; gap: 3px; height: 140px; padding: 4px; }
+.cout-barres .b { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+.cout-barres .b i { display: block; width: 100%; background: var(--hud-strong); border-radius: 3px 3px 0 0; min-height: 0; }
+.cout-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cout-table th, .cout-table td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+.cout-table th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
