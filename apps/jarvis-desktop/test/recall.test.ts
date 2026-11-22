@@ -121,3 +121,93 @@ describe("recall : le garde-fou anti-harcèlement", () => {
     expect(choisir(cand, state(), off, midi, TZ).silence).toBe("désactivé");
   });
 });
+
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { NotesRepository } from "@muscu/jarvis/src/notes.js";
+import { RecallEngine, estResolue, racinesCommunes } from "../src/main/recall.js";
+
+describe("recall : racines, boucles résolues", () => {
+  it("rapproche les formes d'un même mot", () => {
+    expect(racinesCommunes("courroie de distribution", "devis pour les courroies")).toBeGreaterThanOrEqual(1);
+    expect(racinesCommunes("rappeler le garage", "rappel garage demain")).toBeGreaterThanOrEqual(2);
+    expect(racinesCommunes("acheter du pain", "garage peugeot")).toBe(0);
+  });
+
+  it("ne relance pas une intention déjà réalisée depuis", () => {
+    const boucle = note({ id: "b", texte: "Je dois rappeler le garage pour le devis", creeLe: "2026-11-19T10:00:00Z" });
+    const plusTard = [{ texte: "J'ai rappelé le garage, le devis est ok", creeLe: "2026-11-20T09:00:00Z" }];
+    expect(estResolue(boucle, plusTard)).toBe(true);
+    expect(estResolue(boucle, [{ texte: "Rappeler Léa demain", creeLe: "2026-11-20T09:00:00Z" }])).toBe(false);
+    const now = new Date("2026-11-22T14:00:00Z");
+    expect(candidatsBoucles([boucle, note({ id: "c", texte: "J'ai rappelé le garage, le devis est ok", creeLe: "2026-11-20T09:00:00Z" })], now)).toHaveLength(0);
+  });
+});
+
+describe("recall : apprend de tes 👍 / 👎", () => {
+  const cand: RecallCandidate[] = [
+    { cle: "boucle:a", source: "boucle", score: 50, texte: "A" },
+    { cle: "echo:b", source: "echo", score: 49, texte: "B" },
+  ];
+  const midi = new Date("2026-11-22T11:00:00Z"); // 12 h à Paris
+  const vide = () => ({ historique: {}, parJour: {}, recents: [], retours: {}, stats: {} });
+
+  it("ne ressort jamais un rappel jugé inutile", () => {
+    const s = { ...vide(), retours: { "boucle:a": "inutile" as const } };
+    expect(choisir(cand, s, REGLAGE_DEFAUT, midi, TZ).emis?.cle).toBe("echo:b");
+  });
+
+  it("favorise la catégorie appréciée et coupe celle qu'il juge inutile", () => {
+    const aime = { ...vide(), stats: { "source:echo": { utile: 6, inutile: 0 }, "source:boucle": { utile: 0, inutile: 1 } } };
+    expect(choisir(cand, aime, REGLAGE_DEFAUT, midi, TZ).emis?.cle).toBe("echo:b");
+    const rejette = { ...vide(), stats: { "source:boucle": { utile: 0, inutile: 6 } } };
+    expect(choisir(cand, rejette, REGLAGE_DEFAUT, midi, TZ).emis?.cle).toBe("echo:b");
+  });
+
+  it("se tait à une heure qui l'agace", () => {
+    const s = { ...vide(), stats: { "heure:12": { utile: 0, inutile: 4 } } };
+    expect(choisir(cand, s, REGLAGE_DEFAUT, midi, TZ).silence).toBe("heure peu appréciée");
+  });
+
+  it("le moteur enregistre l'avis, l'affiche, et accepte un changement d'avis", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "recall-"));
+    const notes = new NotesRepository(dir, () => new Date("2026-11-22T11:00:00Z"));
+    notes.add("Je dois rappeler le garage", []);
+    const dits: string[] = [];
+    const engine = new RecallEngine({
+      dataDir: dir, timeZone: TZ, notes, agenda: undefined, reglage: { ...REGLAGE_DEFAUT, calmeAvant: 0, calmeApres: 24 },
+      say: (t) => dits.push(t), notify: () => undefined, canSpeak: () => true,
+      now: () => new Date("2026-11-22T20:00:00Z"),
+    });
+    // la note a ~9 h : assez mûre
+    const emis = await engine.tick();
+    expect(emis?.source).toBe("boucle");
+    expect(engine.retour(emis!.cle, "utile")).toBe(true);
+    expect(engine.recents()[0]!.avis).toBe("utile");
+    expect(engine.retour(emis!.cle, "inutile")).toBe(true);
+    expect(engine.recents()[0]!.avis).toBe("inutile");
+    expect(engine.retour("inconnu", "utile")).toBe(false);
+  });
+});
+
+describe("recall : rapprochement par le sens (modèle local simulé)", () => {
+  it("retrouve la note liée au rendez-vous même sans mot en commun", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "recall-sens-"));
+    const now = new Date("2026-11-22T14:00:00Z");
+    const notes = new NotesRepository(dir, () => new Date("2026-11-10T10:00:00Z"));
+    notes.add("Demander le prix de la révision des freins", []);
+    notes.add("Idée de cadeau pour Léa", []);
+    // faux modèle : « dentiste » est proche de « révision des freins » par construction du test
+    const vec = (texte: string) => (/dentiste|freins/i.test(texte) ? Float32Array.from([1, 0]) : Float32Array.from([0, 1]));
+    const embedder = { embed: async (texts: string[]) => texts.map(vec) };
+    const agenda = { list: async () => [{ id: "ev9", summary: "Dentiste", start: "2026-11-22T15:00:00Z" }] };
+    const engine = new RecallEngine({
+      dataDir: dir, timeZone: TZ, notes, agenda: agenda as never, reglage: { ...REGLAGE_DEFAUT, calmeAvant: 0, calmeApres: 24 },
+      say: () => undefined, notify: () => undefined, canSpeak: () => true, embedder, now: () => now,
+    });
+    const emis = await engine.tick();
+    expect(emis?.source).toBe("contexte-rdv");
+    expect(emis?.texte).toContain("révision des freins");
+  });
+});

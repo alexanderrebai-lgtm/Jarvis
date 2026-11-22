@@ -3,7 +3,7 @@ import { buildPage, ICONS } from "../hud.js";
 
 interface Fact { id: string; fait: string; creeLe: string }
 interface Note { id: string; texte: string; tags: string[]; creeLe: string; rappelLe?: string; rappelEnvoye?: boolean }
-interface Rappel { cle: string; source: string; texte: string; instant: string }
+interface Rappel { cle: string; source: string; texte: string; instant: string; avis?: "utile" | "inutile" }
 
 const day = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
 
@@ -65,8 +65,16 @@ export function renderMemory(root: HTMLElement): void {
     });
     const whenShort = (iso: string) => new Date(iso).toLocaleString("fr-FR", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
     proactif.body.innerHTML = data.rappels.length
-      ? data.rappels.map((r) => `<div class="memory-note"><p>${esc(r.texte)}</p><div class="memory-meta"><small>${esc(whenShort(r.instant))}</small></div></div>`).join("")
+      ? data.rappels.map((r) => `<div class="memory-note" data-cle="${esc(r.cle)}"><p>${esc(r.texte)}</p><div class="memory-meta"><small>${esc(whenShort(r.instant))}</small><button class="health-button small" data-avis="utile" ${r.avis === "utile" ? 'style="outline:2px solid var(--ok,#4ade80)"' : ""} title="Utile : j'en veux d'autres comme ça">👍</button><button class="health-button small" data-avis="inutile" ${r.avis === "inutile" ? 'style="outline:2px solid var(--bad,#ff6b6b)"' : ""} title="Pas utile : ne me le redis plus, et fais plus attention">👎</button></div></div>`).join("")
       : `<div class="empty">Rien pour l'instant. De lui-même, aux bonnes heures, Jarvis ressort une note oubliée ou un rappel utile avant un rendez-vous.</div>`;
+    proactif.body.querySelectorAll<HTMLButtonElement>("[data-avis]").forEach((b) => {
+      b.onclick = async () => {
+        const cle = b.closest<HTMLElement>("[data-cle]")?.dataset.cle;
+        if (!cle) return;
+        await api.invoke("rappel:retour", { cle, avis: b.dataset.avis });
+        await load();
+      };
+    });
   };
 
   const load = async () => {

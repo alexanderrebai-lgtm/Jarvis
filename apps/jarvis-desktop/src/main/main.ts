@@ -582,7 +582,9 @@ function updateGameMode(): void {
 
 const learning = new Learning(config.dataDir, workspace);
 const literature = new Literature({ openAlexKey: env("OPENALEX_CLE"), semanticScholarKey: env("SEMANTIC_SCHOLAR_CLE"), ncbiKey: env("NCBI_CLE") });
-const library = new Library({ dataDir: config.dataDir, folder: env("BIBLIOTHEQUE_DOSSIER") ?? path.join(workspace, "bibliotheque"), embedder: env("BIBLIOTHEQUE_SEMANTIQUE") === "false" ? undefined : e5Embedder({ cacheDir: modelCache, threads: tuning.threadsNormal }) });
+// Le modèle de sens local sert à la bibliothèque et au rappel proactif ; il se libère tout seul après quelques minutes sans usage.
+const semanticEmbedder = env("BIBLIOTHEQUE_SEMANTIQUE") === "false" ? undefined : e5Embedder({ cacheDir: modelCache, threads: tuning.threadsNormal });
+const library = new Library({ dataDir: config.dataDir, folder: env("BIBLIOTHEQUE_DOSSIER") ?? path.join(workspace, "bibliotheque"), embedder: semanticEmbedder });
 const lab = new Lab(workspace, assets);
 const garage = new Garage(config.dataDir);
 const budget = new Budget(config.dataDir);
@@ -1695,6 +1697,7 @@ function startConnectorGuard(): void {
 // ---------- Mémoire (page Mémoire) ----------
 
 ipcMain.handle("memoire:lire", () => ({ faits: [...notes.memories()].reverse(), notes: notes.list(100), rappels: recall?.recents(8) ?? [] }));
+ipcMain.handle("rappel:retour", (_event, payload: { cle: string; avis: "utile" | "inutile" }) => (recall?.retour(payload.cle, payload.avis) ?? false) && { rappels: recall?.recents(8) ?? [] });
 ipcMain.handle("memoire:ajouter", (_event, fait: string) => (fait?.trim() ? notes.remember(fait.trim()) : null));
 ipcMain.handle("memoire:modifier", (_event, payload: { id: string; fait: string }) => notes.updateMemory(payload.id, payload.fait.trim()));
 ipcMain.handle("memoire:oublier", (_event, id: string) => notes.forget(id));
@@ -1944,6 +1947,7 @@ void app.whenReady().then(async () => {
     say: (text) => reply(text),
     notify: host.notify,
     canSpeak: () => !flags.doNotDisturb && !flags.jeu && !race.active && !conversation.active,
+    embedder: semanticEmbedder,
     now: () => new Date(),
   });
   recall.start();
