@@ -67,6 +67,7 @@ import { connectPlusHost } from "./plus-host.js";
 import { SuiviVoiture } from "./voiture-suivi.js";
 import { UsageStore, jourLocal, phraseUsage } from "./usage.js";
 import { bilan, capacites, phraseCapacites } from "./capacites.js";
+import { AmeliorationStore, revue as faireRevue } from "./amelioration.js";
 import { createRoutineRunner } from "./routine-runner.js";
 import { createIntentActions } from "./intent-actions.js";
 import { Updates } from "./updates.js";
@@ -757,6 +758,30 @@ function welcomeOnce(): void {
   if (b.actives > 8) return; // installation déjà bien avancée : pas de discours
   host.notify("Bienvenue", "Ouvre Réglages : en haut, « Ce que Jarvis sait faire » liste ce qui est prêt et ce qu'il reste à brancher.");
   if (!flags.doNotDisturb && !flags.jeu) say(`${ownerName}, je sais faire ${b.total} choses et ${b.actives} sont prêtes. Ouvre les réglages : en haut, je te montre ce qu'il reste à brancher, avec le bouton pour y aller.`);
+}
+
+// ---------- Auto-amélioration (revue hebdomadaire du journal) ----------
+const ameliorations = new AmeliorationStore(config.dataDir);
+async function lancerRevue(): Promise<{ echecs: number; propositions: number; message: string }> {
+  const r = await faireRevue({
+    journal,
+    actions,
+    notes,
+    store: ameliorations,
+    ask: (prompt) => brain.ask(mask(prompt), {}, { trust: "restreint", outils: [], source: "auto-amélioration" }),
+  });
+  if (r.propositions > 0) host.notify("Jarvis a des idées pour s'améliorer", r.message);
+  return r;
+}
+/** Une revue par semaine, en journée, jamais pendant un jeu ni au plafond de consommation. */
+function startAmeliorations(): void {
+  const tick = () => {
+    const h = new Date().getHours();
+    if (flags.jeu || autoBloque() || h < 10 || h >= 20 || !ameliorations.due(new Date())) return;
+    void lancerRevue().catch((e) => console.warn("[amélioration]", e));
+  };
+  setTimeout(tick, 5 * 60_000);
+  setInterval(tick, 3 * 3_600_000);
 }
 
 // ---------- Coût et usage de Claude ----------
@@ -1736,6 +1761,13 @@ function startConnectorGuard(): void {
 ipcMain.handle("memoire:lire", () => ({ faits: [...notes.memories()].reverse(), notes: notes.list(100), rappels: recall?.recents(8) ?? [] }));
 ipcMain.handle("rappel:retour", (_event, payload: { cle: string; avis: "utile" | "inutile" }) => (recall?.retour(payload.cle, payload.avis) ?? false) && { rappels: recall?.recents(8) ?? [] });
 const capaciteListe = () => capacites({ env, briefings: briefingStore.list().length, connecteurs: connectors.list().length, documentsBibliotheque: library.documents().length, motEveilActif: !!wakeEngine });
+ipcMain.handle("ameliorations:lire", () => ({ propositions: ameliorations.liste(), derniereRevue: ameliorations.derniereRevue() ?? null }));
+ipcMain.handle("ameliorations:decider", (_event, payload: { id: string; accepte: boolean }) => {
+  const p = ameliorations.decider(payload.id, payload.accepte, notes);
+  if (p) actions.add({ outil: "amélioration", resume: `${payload.accepte ? "Règle acceptée" : "Règle refusée"} : ${p.regle}`, autorise: true });
+  return { propositions: ameliorations.liste(), derniereRevue: ameliorations.derniereRevue() ?? null };
+});
+ipcMain.handle("ameliorations:lancer", async () => ({ ...(await lancerRevue()), propositions: ameliorations.liste(), derniereRevue: ameliorations.derniereRevue() ?? null }));
 ipcMain.handle("capacites:lire", () => ({ liste: capaciteListe(), bilan: bilan(capaciteListe()) }));
 ipcMain.handle("cout:lire", () => ({ resume: usage.summary(30), plafond: usagePlafond() ?? null, pauseAuto: env("USAGE_PAUSE_AUTO") !== "off", mode: env("ANTHROPIC_API_KEY") ? "cle-api" : "abonnement" }));
 ipcMain.handle("memoire:ajouter", (_event, fait: string) => (fait?.trim() ? notes.remember(fait.trim()) : null));
@@ -2000,6 +2032,7 @@ void app.whenReady().then(async () => {
   backups.start();
   startBriefings();
   if (!startupTest) startConnectorGuard();
+  if (!startupTest) startAmeliorations();
   if (!startupTest) setTimeout(welcomeOnce, 90_000);
   startScreenWatch();
   void startHealth();
@@ -2176,4 +2209,4 @@ const suivi = traccarUrl
       appareil: env("VOITURE_TRACCAR_APPAREIL"),
     })
   : undefined;
-connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings: briefingActions, sante: () => healthStore.phrase(), cout: () => phraseUsage(usage.summary(30), usagePlafond()), capacites: () => phraseCapacites(capaciteListe()), voiture: () => (suivi ? suivi.phrase() : Promise.resolve("Le suivi de la voiture n'est pas configuré : va dans Réglages → Voiture (traceur GPS) pour relier ton serveur Traccar.")) });
+connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings: briefingActions, sante: () => healthStore.phrase(), cout: () => phraseUsage(usage.summary(30), usagePlafond()), capacites: () => phraseCapacites(capaciteListe()), revue: async () => (await lancerRevue()).message, voiture: () => (suivi ? suivi.phrase() : Promise.resolve("Le suivi de la voiture n'est pas configuré : va dans Réglages → Voiture (traceur GPS) pour relier ton serveur Traccar.")) });

@@ -45,9 +45,10 @@ export function renderJournal(root: HTMLElement): void {
   const chips = el("div", "journal-filters");
   list.body.before(chips);
   center.append(list.root);
+  const idees = panel("Idées d'amélioration", "", { icon: ICONS.pulse, accent: "gold", link: false });
   const summary = panel("En bref", "", { icon: ICONS.health, accent: "green" });
   const errors = panel("Erreurs récentes", "grow", { icon: ICONS.bell, accent: "red" });
-  right.append(summary.root, errors.root);
+  right.append(idees.root, summary.root, errors.root);
   root.append(page);
 
   let data: JournalData | undefined;
@@ -79,7 +80,27 @@ export function renderJournal(root: HTMLElement): void {
       : '<div class="empty">Aucune erreur enregistrée.</div>';
   };
 
+  interface Idee { id: string; titre: string; pourquoi: string; regle: string; etat: "proposee" | "acceptee" | "refusee" }
+  interface IdeesData { propositions: Idee[]; derniereRevue: string | null; message?: string }
+  const drawIdees = (r: IdeesData) => {
+    const ouvertes = r.propositions.filter((p) => p.etat === "proposee");
+    idees.body.innerHTML = `<p class="lead">Chaque semaine, Jarvis relit où il a échoué (tu l'as corrigé, reformulé, il a été refusé) et te propose des règles. Rien ne change sans ton accord.</p>
+      ${r.message ? `<p class="tip">${esc(r.message)}</p>` : ""}
+      ${ouvertes.length ? ouvertes.map((p) => `<div class="memory-note" data-id="${esc(p.id)}"><p><b>${esc(p.titre)}</b><br>${esc(p.regle)}<br><small>${esc(p.pourquoi)}</small></p><div class="memory-meta"><button class="health-button small" data-ok>Accepter</button><button class="health-button small" data-no>Refuser</button></div></div>`).join("") : '<div class="empty">Aucune proposition pour l\'instant.</div>'}
+      <div class="memory-meta"><small>${r.derniereRevue ? `Dernière revue : ${esc(new Date(r.derniereRevue).toLocaleDateString("fr-FR"))}` : "Pas encore de revue."}</small><button class="health-button small" data-run>Faire la revue maintenant</button></div>`;
+    idees.body.querySelectorAll<HTMLElement>("[data-id]").forEach((n) => {
+      const decide = async (accepte: boolean) => drawIdees(await api.invoke<IdeesData>("ameliorations:decider", { id: n.dataset.id, accepte }));
+      n.querySelector<HTMLButtonElement>("[data-ok]")!.onclick = () => void decide(true);
+      n.querySelector<HTMLButtonElement>("[data-no]")!.onclick = () => void decide(false);
+    });
+    idees.body.querySelector<HTMLButtonElement>("[data-run]")!.onclick = async (ev) => {
+      (ev.target as HTMLButtonElement).disabled = true;
+      drawIdees(await api.invoke<IdeesData>("ameliorations:lancer"));
+    };
+  };
+
   const load = async (day?: string) => {
+    void api.invoke<IdeesData>("ameliorations:lire").then(drawIdees);
     data = await api.invoke<JournalData>("journal:lire", day);
     draw();
   };
