@@ -15,7 +15,7 @@ describe("santé : lecture des formats", () => {
 
   it("lit le format Health Auto Export, l'objet simple et la liste", () => {
     const hae = parsePayload({ data: { metrics: [{ name: "step_count", units: "count", data: [{ date: "2026-11-23 08:00:00", qty: 3200 }, { date: "2026-11-23 10:00:00", qty: 5400 }] }, { name: "heart_rate", units: "bpm", data: [{ date: "2026-11-23 10:00:00", Avg: 64 }] }] } });
-    expect(hae.find((s) => s.type === "pas")?.valeur).toBe(5400);
+    expect(hae.filter((s) => s.type === "pas").map((s) => s.valeur)).toEqual([3200, 5400]);
     expect(hae.find((s) => s.type === "rythme")?.valeur).toBe(64);
     expect(parsePayload({ pas: 8000, rythme: 62, blabla: 1 }).map((s) => s.type).sort()).toEqual(["pas", "rythme"]);
     expect(parsePayload([{ type: "poids", valeur: 74.2 }])[0]).toMatchObject({ type: "poids", valeur: 74.2 });
@@ -88,5 +88,32 @@ describe("santé : applis Android (Health Connect Webhook)", () => {
     const resume = store.summary(() => new Date("2026-11-23T12:00:00Z"));
     expect(resume.find((x) => x.type === "pas")?.valeur).toBe(3200);
     expect(resume.find((x) => x.type === "rythme")?.valeur).toBe(72);
+  });
+});
+
+describe("santé : iPhone (Health Auto Export) sur plusieurs envois", () => {
+  const now = () => new Date("2026-11-23T20:00:00Z");
+  const hae = (pas: Array<[string, number]>) => ({ data: { metrics: [{ name: "step_count", units: "count", data: pas.map(([date, qty]) => ({ date, qty })) }] } });
+
+  it("pas heure par heure : tous les points comptent, et un renvoi mis à jour remplace au lieu de s'ajouter", () => {
+    const store = new HealthStore(mkdtempSync(path.join(tmpdir(), "hae-")));
+    store.ingest(parsePayload(hae([["2026-11-23 08:00:00 +0000", 1000], ["2026-11-23 09:00:00 +0000", 2000]])));
+    expect(store.summary(now).find((s) => s.type === "pas")?.valeur).toBe(3000);
+    // plus tard, même lot + une heure de plus + l'heure de 9 h corrigée
+    store.ingest(parsePayload(hae([["2026-11-23 08:00:00 +0000", 1000], ["2026-11-23 09:00:00 +0000", 2500], ["2026-11-23 10:00:00 +0000", 500]])));
+    expect(store.summary(now).find((s) => s.type === "pas")?.valeur).toBe(4000);
+  });
+
+  it("total du jour qui grandit : le dernier total remplace le précédent", () => {
+    const store = new HealthStore(mkdtempSync(path.join(tmpdir(), "hae-")));
+    store.ingest(parsePayload(hae([["2026-11-23 00:00:00 +0000", 3200]])));
+    store.ingest(parsePayload(hae([["2026-11-23 00:00:00 +0000", 5400]])));
+    expect(store.summary(now).find((s) => s.type === "pas")?.valeur).toBe(5400);
+  });
+
+  it("lit le sommeil en heures et les étages (flights_climbed)", () => {
+    const s = parsePayload({ data: { metrics: [{ name: "sleep_analysis", units: "hr", data: [{ date: "2026-11-23 06:30:00 +0000", totalSleep: 7.4, asleep: 7.1 }] }, { name: "flights_climbed", units: "count", data: [{ date: "2026-11-23 12:00:00 +0000", qty: 6 }] }] } });
+    expect(s.find((x) => x.type === "sommeil")?.valeur).toBe(7.4);
+    expect(s.find((x) => x.type === "etages")?.valeur).toBe(6);
   });
 });

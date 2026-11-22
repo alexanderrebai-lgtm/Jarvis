@@ -55,7 +55,7 @@ const ALIASES: Array<[RegExp, MetricType]> = [
   [/weight|poids|masse/i, "poids"],
   [/stress/i, "stress"],
   [/distance|marche|walk/i, "distance"],
-  [/floor|etage|étage|stair/i, "etages"],
+  [/floor|flight|etage|étage|stair/i, "etages"],
   [/pressure|tension|blood.*press/i, "tension"],
 ];
 
@@ -88,8 +88,9 @@ export function parsePayload(body: unknown, now = () => new Date()): Sample[] {
       const unite = m.units ? String(m.units) : undefined;
       const points = Array.isArray(m.data) ? (m.data as Array<Record<string, unknown>>) : [];
       if (points.length) {
-        const last = points[points.length - 1]!;
-        push(name, num(last.qty ?? last.value ?? last.valeur ?? last.Avg ?? last.avg), unite, last.date ? new Date(String(last.date)).toISOString() : undefined);
+        // Toutes les mesures du lot (une par heure ou par jour selon l'appli), pas seulement la dernière :
+        // Health Auto Export renvoie les pas heure par heure. Le sommeil est en heures (totalSleep / asleep).
+        for (const p of points.slice(-200)) push(name, num(p.qty ?? p.value ?? p.valeur ?? p.Avg ?? p.avg ?? p.totalSleep ?? p.asleep), unite, parseDate(p.date));
       } else push(name, num(m.qty ?? m.value ?? m.valeur), unite);
     }
     return out;
@@ -139,6 +140,14 @@ function parseHealthConnect(b: Record<string, unknown>, out: Sample[]): boolean 
   return true;
 }
 
+/** « 2026-11-23 08:00:00 +0100 » (Health Auto Export) ou date ISO → ISO ; undefined si illisible. */
+function parseDate(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  let t = Date.parse(v);
+  if (!Number.isFinite(t)) t = Date.parse(v.replace(" ", "T").replace(/ ?([+-]\d{2})(\d{2})$/, "$1:$2"));
+  return Number.isFinite(t) ? new Date(t).toISOString() : undefined;
+}
+
 function isoDay(iso: string): string {
   return iso.slice(0, 10);
 }
@@ -150,22 +159,32 @@ export class HealthStore {
     this.store = new JsonStore(dataDir, "sante", () => []);
   }
 
+  /**
+   * Enregistre les mesures. Une mesure est identifiée par son type et son heure : si l'appli renvoie la même
+   * heure avec une valeur à jour (le total de pas du jour qui grandit), elle remplace l'ancienne au lieu de
+   * s'y ajouter ; un lot renvoyé tel quel après un échec ne change rien.
+   */
   ingest(samples: Sample[]): number {
     if (!samples.length) return 0;
-    let ajoutes = 0;
+    let ecrits = 0;
     this.store.update((all) => {
-      // Une appli qui renvoie le même lot après un échec ne doit pas doubler les pas du jour.
-      const vus = new Set(all.map((s) => `${s.type}|${s.instant}|${s.valeur}`));
-      const nouveaux = samples.filter((s) => {
-        const k = `${s.type}|${s.instant}|${s.valeur}`;
-        if (vus.has(k)) return false;
-        vus.add(k);
-        return true;
-      });
-      ajoutes = nouveaux.length;
-      return [...all, ...nouveaux].slice(-this.max);
+      const out = [...all];
+      const index = new Map<string, number>(out.map((s, i) => [`${s.type}|${s.instant}`, i]));
+      for (const s of samples) {
+        const k = `${s.type}|${s.instant}`;
+        const i = index.get(k);
+        if (i === undefined) {
+          index.set(k, out.length);
+          out.push(s);
+          ecrits++;
+        } else if (out[i]!.valeur !== s.valeur) {
+          out[i] = s;
+          ecrits++;
+        }
+      }
+      return out.slice(-this.max);
     });
-    return ajoutes;
+    return ecrits;
   }
 
   all(): Sample[] {
