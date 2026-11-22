@@ -38,11 +38,13 @@ export const SETTING_GROUPS: SettingGroup[] = [
   {
     id: "general",
     titre: "Toi et ta ville",
-    description: "Ton prénom, ta ville (pour la météo) et ton fuseau horaire.",
+    description: "Ton prénom, ta ville (pour la météo), ton fuseau horaire et le mode jeu.",
     champs: [
       { cle: "OWNER_NAME", libelle: "Prénom", type: "texte", redemarrage: true },
       { cle: "JARVIS_VILLE", libelle: "Ville pour la météo", type: "texte", exemple: "Lyon" },
       { cle: "TZ", libelle: "Fuseau horaire", type: "texte", exemple: "Europe/Paris", redemarrage: true },
+      { cle: "MODE_JEU", libelle: "Mode jeu automatique", type: "choix", options: [{ valeur: "auto", libelle: "Oui : pendant un jeu, Jarvis libère la carte graphique (conseillé)" }, { valeur: "off", libelle: "Non" }], aide: "Pendant le jeu : voix locale arrêtée (voix en ligne), petite reconnaissance vocale sur le processeur, webcams et animations en pause, priorité basse." },
+      { cle: "JEUX_PROCESSUS", libelle: "Autres jeux à détecter (nom du programme .exe)", type: "liste", exemple: "iRacing.exe, ACC.exe", redemarrage: true, aide: "Le Mans Ultimate et F1 sont déjà reconnus." },
     ],
     actions: [{ id: "meteo", libelle: "Tester la météo" }],
   },

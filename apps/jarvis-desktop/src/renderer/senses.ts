@@ -16,11 +16,19 @@ function reportSenses(change: Partial<typeof sensesState>): void {
 }
 let listening = false;
 api.on("jarvis:state", ({ state }: { state: string }) => (listening = state === "ecoute"));
-api.on("jarvis:flags", (next: typeof flags) => {
+let inGame = false;
+void api.invoke<boolean>("jeu:etat").then((on) => {
+  inGame = on;
+  if (on) stopWebcams();
+}).catch(() => undefined);
+api.on("jarvis:flags", (next: typeof flags & { jeu?: boolean }) => {
   const camerasChanged = next.cameras !== flags.cameras;
+  const gameChanged = Boolean(next.jeu) !== inGame;
+  inGame = Boolean(next.jeu);
   Object.assign(flags, next);
-  if (camerasChanged) {
-    if (flags.cameras) void startWebcams();
+  // Pendant un jeu, les webcams et la reconnaissance des gestes s'arrêtent (elles utilisent la carte graphique).
+  if (camerasChanged || gameChanged) {
+    if (flags.cameras && !inGame) void startWebcams();
     else stopWebcams();
   }
 });
@@ -229,10 +237,12 @@ export function onGesture(listener: (gesture: string, wrist?: { x: number; y: nu
 
 export async function startWebcams(): Promise<number> {
   stopWebcams();
+  if (inGame) return 0;
   const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
   for (const device of devices.slice(0, 6)) {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: device.deviceId }, width: 1280, height: 720 } });
+      // 960×540 suffit aux gestes et aux photos, et coûte moitié moins que la HD.
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: device.deviceId }, width: 960, height: 540, frameRate: { max: 15 } } });
       const video = document.createElement("video");
       video.muted = true;
       video.autoplay = true;
@@ -304,7 +314,7 @@ async function startGestures(video: HTMLVideoElement): Promise<void> {
           gestureListener?.(name);
         }
       }
-      setTimeout(loop, 90);
+      setTimeout(loop, 120);
     };
     loop();
   } catch (error) {

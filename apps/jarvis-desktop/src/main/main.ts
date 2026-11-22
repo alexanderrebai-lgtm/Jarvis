@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { constants as osConstants, setPriority } from "node:os";
 import path from "node:path";
 import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, Notification, powerSaveBlocker, protocol, safeStorage, screen, shell, Tray } from "electron";
 import ffmpegPath from "ffmpeg-static";
@@ -168,7 +169,7 @@ const tools: ToolContext = { mail, agenda, notes, pending, inbox, browser, home,
 let bubble: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let quitting = false;
-const flags = { micro: true, cameras: true, doNotDisturb: false, speaking: false, surveillance: "off" as SurveillanceMode };
+const flags = { micro: true, cameras: true, doNotDisturb: false, speaking: false, surveillance: "off" as SurveillanceMode, jeu: false };
 
 function rendererUrl(page: string): string {
   return `file://${path.join(__dirname, "renderer", "index.html").replace(/\\/g, "/")}?page=${page}`;
@@ -260,6 +261,7 @@ function updateTray(): void {
       { label: "Micro", type: "checkbox", checked: flags.micro, click: () => setFlag("micro", !flags.micro) },
       { label: "Caméras", type: "checkbox", checked: flags.cameras, click: () => setFlag("cameras", !flags.cameras) },
       { label: "Ne pas déranger", type: "checkbox", checked: flags.doNotDisturb, click: () => setFlag("doNotDisturb", !flags.doNotDisturb) },
+      { label: "Mode jeu (libère la carte graphique)", type: "checkbox", checked: flags.jeu, click: () => ((gameManual = !flags.jeu), updateGameMode()) },
       { label: "Surveillance", submenu: (["off", "simple", "complete"] as const).map((m) => ({ label: { off: "Arrêtée", simple: "Simple", complete: "Complète" }[m], type: "radio" as const, checked: flags.surveillance === m, click: () => setSurveillance(m) })) },
       { type: "separator" },
       { label: "Diagnostic", click: () => pages.openPage("diagnostic") },
@@ -529,6 +531,7 @@ const race = new RaceManager({
   onState: (state) => {
     broadcast("race:state", state ?? null);
     pages.setGameRunning(race.active || games.active);
+    updateGameMode();
   },
   onSessionEnd: (summary, csvPath, state) => {
     journal.add({ demande: `Séance de simulation ${state.jeu} terminée`, reponse: `${summary} Tours enregistrés dans ${csvPath}.`, outils: ["course"] });
@@ -538,8 +541,50 @@ const race = new RaceManager({
 });
 const games = new GameWatcher({
   processes: [...DEFAULT_GAME_PROCESSES, ...(env("JEUX_PROCESSUS") ?? "").split(",").map((s) => s.trim()).filter(Boolean)],
-  onChange: (running) => pages.setGameRunning(running.length > 0 || race.active),
+  onChange: (running) => {
+    pages.setGameRunning(running.length > 0 || race.active);
+    gameManual = undefined;
+    updateGameMode();
+  },
 });
+
+// ---------- Mode jeu : la carte graphique et le processeur reviennent au jeu ----------
+
+/** Choix manuel (menu de l'icône) ; undefined = automatique selon les jeux détectés. */
+let gameManual: boolean | undefined;
+function updateGameMode(): void {
+  const auto = env("MODE_JEU") !== "off" && (games.active || race.active);
+  void applyGameMode(gameManual ?? auto);
+}
+
+async function applyGameMode(on: boolean): Promise<void> {
+  if (on === flags.jeu) return;
+  flags.jeu = on;
+  broadcast("jarvis:flags", flags);
+  updateTray();
+  // Voix locale (plusieurs Go sur la carte graphique) : arrêtée, la voix en ligne prend le relais.
+  if (on) localVoice.stop();
+  // Reconnaissance vocale : petit modèle sur le processeur pendant le jeu.
+  ears.setLight(on);
+  // Mesures du PC plus espacées.
+  perf.setInterval(on ? 20_000 : 3_000);
+  setLowPriority(on);
+  actions.add({ outil: "mode jeu", resume: on ? `Activé${games.games.length ? ` (${games.games.join(", ")})` : ""} : voix locale arrêtée, reconnaissance vocale allégée, animations en pause.` : "Désactivé : Jarvis reprend ses réglages habituels.", autorise: true, origine: "automatique" });
+  if (!on && env("VOIX_MOTEUR") === "locale" && localVoice.installed) setTimeout(() => !flags.jeu && void localVoice.start(), 30_000);
+}
+
+/** Pendant un jeu, tous les processus de Jarvis passent en priorité basse (Windows donne la main au jeu). */
+function setLowPriority(low: boolean): void {
+  const level = low ? osConstants.priority.PRIORITY_BELOW_NORMAL : osConstants.priority.PRIORITY_NORMAL;
+  const pids = new Set<number>([process.pid, ...app.getAppMetrics().map((m) => m.pid), ...(localVoice.pid ? [localVoice.pid] : [])]);
+  for (const pid of pids) {
+    try {
+      setPriority(pid, level);
+    } catch {
+      // processus déjà terminé ou protégé
+    }
+  }
+}
 
 // ---------- Apprendre, chercher, calculer ----------
 
@@ -584,7 +629,7 @@ const brain = new Brain({
 const voice = new Voice(env("JARVIS_VOICE") ?? DEFAULT_VOICE, env("JARVIS_VOICE_RATE") ?? "+0%", env("JARVIS_VOICE_PITCH") ?? "+0Hz");
 const localVoice = new LocalVoice(workspace, { assetsDir: assets, findPython: () => lab.findPython() });
 voice.local = {
-  active: () => env("VOIX_MOTEUR") === "locale" && localVoice.installed,
+  active: () => env("VOIX_MOTEUR") === "locale" && localVoice.installed && !flags.jeu,
   synthesize: (text) => localVoice.synthesize(text, { reference: env("VOIX_REFERENCE"), expressivite: Number((env("VOIX_EXPRESSIVITE") ?? "0.5").replace(",", ".")) || 0.5 }),
 };
 const sttSetting = env("STT_MODEL") ?? "auto";
@@ -1082,6 +1127,7 @@ const backups = new BackupService({
   ],
   destination: path.join(workspace, "sauvegardes"),
   copie: env("SAUVEGARDE_COPIE"),
+  canRun: () => !flags.jeu,
   onDone: (result) => {
     actions.add({ outil: "sauvegarde", resume: `${result.fichiers} fichiers → ${result.fichier}`, autorise: true, origine: "automatique" });
     try {
@@ -1196,7 +1242,8 @@ plusHostRef.current = {
 // ---------- Veilleur des connexions ----------
 
 const watchdog = new Watchdog({
-  run: () => runDiagnostic(),
+  // Pendant un jeu, pas de contrôles (ils réveillent le réseau et la carte graphique).
+  run: () => (flags.jeu ? Promise.resolve([]) : runDiagnostic()),
   watched: ["claude", "google", "spotify", "tapo", "cameras", "sauvegardes", "voix", "micro", "disque"],
   onLost: (lost) => {
     const text = describeLost(lost);
@@ -1484,6 +1531,14 @@ async function handleCommand(text: string, source: "voix" | "clavier", trust: "p
   stopSpeaking();
   broadcast("jarvis:message", { from: "alex", text: command, source });
   if (handlePageCommand(command)) return;
+  // « Mode jeu » à la demande (en plus de la détection automatique des jeux).
+  const gameAsk = command.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
+  if (/^((active|passe en|lance|mets) )?(le )?mode jeu$/.test(gameAsk) || /^((desactive|quitte|arrete|coupe|enleve|sors du) (le )?mode jeu)$/.test(gameAsk)) {
+    gameManual = !/^(desactive|quitte|arrete|coupe|enleve|sors)/.test(gameAsk);
+    updateGameMode();
+    reply(gameManual ? "Mode jeu. Je libère la carte graphique et je me fais légère." : "Mode jeu terminé. Je reprends mes réglages habituels.");
+    return;
+  }
   const intent = parseIntent(command);
   if (intent && (await runIntent(intent, trust))) {
     conversation.open();
@@ -1743,6 +1798,7 @@ ipcMain.handle("diagnostic:run", async () => {
   return { resultats: results, resume: sayDiagnostic(results), version: app.getVersion() };
 });
 
+ipcMain.handle("jeu:etat", () => flags.jeu);
 ipcMain.handle("journal:lire", (_event, date?: string) => {
   const jours = actions.days().slice(0, 60);
   const jour = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : (jours[0] ?? new Date().toISOString().slice(0, 10));
@@ -1844,7 +1900,8 @@ const settings = new SettingsStore(envFile, vault);
 /** Ce qui change à chaud après un enregistrement. */
 function applySettings(keys: string[]): void {
   if (keys.includes("JARVIS_VILLE")) void weather.setCity(env("JARVIS_VILLE"));
-  if (keys.includes("VOIX_MOTEUR") && env("VOIX_MOTEUR") === "locale" && localVoice.installed) void localVoice.start();
+  if (keys.includes("VOIX_MOTEUR") && env("VOIX_MOTEUR") === "locale" && localVoice.installed && !flags.jeu) void localVoice.start();
+  if (keys.includes("MODE_JEU")) updateGameMode();
   if (keys.includes("VOIX_SEUIL") && env("VOIX_SEUIL")) voiceLock.setThreshold(Number(env("VOIX_SEUIL")!.replace(",", ".")));
   if (keys.some((k) => k.startsWith("REVEIL") || k.startsWith("PLANNING"))) void wake?.refresh();
 }
@@ -2142,7 +2199,7 @@ void app.whenReady().then(async () => {
   });
   // Bibliothèque et relevés : un passage au démarrage, puis régulièrement.
   setTimeout(() => void library.scan().catch((e) => console.warn("[bibliothèque]", e)), 3 * 60_000);
-  setInterval(() => void library.scan().catch(() => undefined), 15 * 60_000);
+  setInterval(() => !flags.jeu && void library.scan().catch(() => undefined), 15 * 60_000);
   setTimeout(() => void importStatements(), 2 * 60_000);
   setInterval(() => void importStatements(), 60 * 60_000);
   // L'accueil se met à jour (rendez-vous, rappels) toutes les minutes.

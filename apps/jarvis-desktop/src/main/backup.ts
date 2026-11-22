@@ -164,7 +164,7 @@ export class BackupService {
   private running = false;
   last: { date: string; fichiers: number; octets: number; erreur?: string } | undefined;
 
-  constructor(private readonly options: BackupOptions & { hour?: number; onDone?: (result: { fichier: string; fichiers: number }) => void }) {
+  constructor(private readonly options: BackupOptions & { hour?: number; onDone?: (result: { fichier: string; fichiers: number }) => void; canRun?: () => boolean }) {
     const latest = listBackups(options.destination)[0];
     if (latest) this.last = { date: latest.date, fichiers: 0, octets: latest.octets };
   }
@@ -174,7 +174,8 @@ export class BackupService {
       const now = new Date();
       const today = stamp(now);
       const due = !this.last || (this.last.date < today && now.getHours() >= (this.options.hour ?? 3));
-      if (due) void this.run();
+      // Pendant un jeu, la sauvegarde attend (elle lit beaucoup le disque).
+      if (due && (this.options.canRun?.() ?? true)) void this.run();
     };
     setTimeout(check, 90_000);
     this.timer = setInterval(check, 30 * 60_000);

@@ -260,6 +260,17 @@ Il montre les graphiques et note chaque essai dans le **cahier d'expériences** 
 - **Copie des mots de passe** : le coffre-fort est lié à ta session Windows. Choisis un **mot de passe de sauvegarde** (Réglages → Sauvegardes) : à chaque sauvegarde, Jarvis écrit `jarvis-coffre.chiffre`, lisible seulement avec ce mot de passe. Après une réinstallation : réinstalle Jarvis, tape le même mot de passe, enregistre, puis « Restaurer mes mots de passe… ».
 - **Test de démarrage** : avant chaque publication, GitHub lance Jarvis sous Windows ; s'il ne démarre pas, la mise à jour n'est pas publiée.
 
+## Mode jeu (Le Mans Ultimate, F1…)
+
+Dès qu'un jeu est détecté (ou sur « Jarvis, mode jeu », ou par le menu de l'icône), Jarvis laisse la place :
+- la voix locale (plusieurs Go sur la carte graphique) s'arrête : voix en ligne pendant le jeu ;
+- la reconnaissance vocale passe sur un petit modèle au processeur (Whisper base) ;
+- webcams, gestes et animations se mettent en pause ; la boule ralentit ;
+- mesures du PC toutes les 20 s, pas de sauvegarde, de scan de la bibliothèque ni de contrôles du veilleur ;
+- tous les processus de Jarvis passent en priorité basse.
+
+À la sortie du jeu, tout reprend. Hors jeu, la voix locale se décharge seule après 20 minutes sans parler et se recharge en arrière-plan (la première phrase part alors en voix en ligne). Réglages → Toi et ta ville : désactiver le mode jeu automatique, ajouter d'autres jeux.
+
 ## Mot d'éveil, mode absent et journal
 
 - **Son nom** : Jarvis n'agit que si une phrase contient « Jarvis » (ou juste après une réponse). Ce qui ne lui est pas adressé n'est ni affiché ni gardé. Réglages → Voix et oreilles : autres noms, durée d'écoute de la suite (0 = toujours dire son nom), petit son quand il t'entend.

@@ -17,12 +17,14 @@ export class LocalVoice {
   private starting: Promise<boolean> | undefined;
   private readonly token = randomBytes(12).toString("hex");
   status: "absente" | "installee" | "demarrage" | "prete" | "erreur" = "absente";
+  private lastUse = 0;
+  private idleTimer: NodeJS.Timeout | undefined;
   device: string | undefined;
   lastError: string | undefined;
 
   constructor(
     workspace: string,
-    private readonly options: { assetsDir: string; findPython: () => Promise<string | undefined>; port?: number; fetchFn?: typeof fetch },
+    private readonly options: { assetsDir: string; findPython: () => Promise<string | undefined>; port?: number; fetchFn?: typeof fetch; idleMs?: number },
   ) {
     this.dir = path.join(workspace, "voix");
     mkdirSync(this.dir, { recursive: true });
@@ -31,6 +33,11 @@ export class LocalVoice {
 
   private get python(): string {
     return process.platform === "win32" ? path.join(this.dir, ".venv", "Scripts", "python.exe") : path.join(this.dir, ".venv", "bin", "python");
+  }
+
+  /** Processus du serveur de voix (pour baisser sa priorité pendant un jeu). */
+  get pid(): number | undefined {
+    return this.server?.pid;
   }
 
   get installed(): boolean {
@@ -136,14 +143,25 @@ export class LocalVoice {
   }
 
   stop(): void {
+    if (this.idleTimer) clearInterval(this.idleTimer);
+    this.idleTimer = undefined;
     this.server?.kill();
     this.server = undefined;
     if (this.installed) this.status = "installee";
   }
 
-  /** Une phrase en audio WAV, ou undefined (la voix en ligne prend alors le relais). */
+  /**
+   * Une phrase en audio WAV, ou undefined (la voix en ligne prend alors le relais).
+   * Si le modèle n'est pas encore chargé, il se charge en arrière-plan : cette phrase-ci part en voix en ligne,
+   * pour ne jamais faire attendre une réponse d'une minute.
+   */
   async synthesize(text: string, options: { reference?: string | undefined; expressivite?: number } = {}): Promise<Buffer | undefined> {
-    if (!(await this.start())) return undefined;
+    this.lastUse = Date.now();
+    if (this.status !== "prete" || !this.server || this.server.exitCode !== null) {
+      void this.start();
+      return undefined;
+    }
+    this.watchIdle();
     const res = await (this.options.fetchFn ?? fetch)(`http://127.0.0.1:${this.port}/dire`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-jeton": this.token },
@@ -155,6 +173,15 @@ export class LocalVoice {
       return undefined;
     }
     return Buffer.from(await res.arrayBuffer());
+  }
+
+  /** Sans phrase depuis un moment (20 min par défaut), le modèle est déchargé : la carte graphique retrouve sa mémoire. */
+  private watchIdle(): void {
+    if (this.idleTimer) return;
+    this.idleTimer = setInterval(() => {
+      if (this.status === "prete" && Date.now() - this.lastUse > (this.options.idleMs ?? 20 * 60_000)) this.stop();
+    }, 60_000);
+    this.idleTimer.unref?.();
   }
 }
 

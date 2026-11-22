@@ -161,9 +161,44 @@ export class Ears {
     return this.options.model;
   }
 
+  private light: { model: string; device: string } | undefined;
+
+  /** Vrai pendant un jeu : petit modèle sur le processeur, la carte graphique reste au jeu. */
+  get lightMode(): boolean {
+    return this.light !== undefined;
+  }
+
+  /**
+   * Mode léger (jeux) : libère le modèle chargé sur la carte graphique et passe
+   * sur Whisper base au processeur ; à la sortie, reprend le modèle habituel.
+   */
+  setLight(on: boolean): void {
+    if (on === this.lightMode) return;
+    const previous = this.transcriber;
+    this.transcriber = undefined;
+    this.loadError = undefined;
+    if (on) {
+      this.light = { model: this.options.model, device: this.options.device };
+      this.options.model = LIGHT_SPEECH_MODEL;
+      this.options.device = "cpu";
+    } else if (this.light) {
+      this.options.model = this.light.model;
+      this.options.device = this.light.device;
+      this.light = undefined;
+    }
+    this.activeDevice = undefined;
+    // L'ancien modèle est libéré un peu plus tard (une phrase peut être en cours de transcription).
+    if (previous) setTimeout(() => void previous.then((t) => (t as unknown as { dispose?: () => Promise<void> }).dispose?.()).catch(() => undefined), 20_000);
+    this.warmUp();
+  }
+
   /** Change de modèle (avant le premier chargement). */
   configure(model: string, device?: string): void {
     if (this.transcriber) return;
+    if (this.light) {
+      this.light = { model, device: device ?? this.light.device };
+      return;
+    }
     this.options.model = model;
     if (device) this.options.device = device;
   }
@@ -207,6 +242,9 @@ export class Ears {
     return cleanTranscript(text);
   }
 }
+
+/** Pendant un jeu : petit, rapide, sur le processeur. */
+export const LIGHT_SPEECH_MODEL = "onnx-community/whisper-base";
 
 /** Modèle de reconnaissance selon la carte graphique : Whisper large-v3-turbo avec 6 Go de mémoire vidéo ou plus, sinon small. */
 export function pickSpeechModel(vramMb: number | undefined): { model: string; device: string } {

@@ -9,6 +9,16 @@ import { api, el, esc, voiceLevel } from "./common.js";
 
 interface Trace { points: Array<[number, number]>; length: number }
 
+// ---------- Mode jeu : animations en pause pour laisser la carte graphique au jeu ----------
+
+let gameMode = false;
+function setGameMode(on: boolean): void {
+  gameMode = on;
+  document.body.classList.toggle("mode-jeu", on);
+}
+api.on("jarvis:flags", (f: { jeu?: boolean }) => setGameMode(Boolean(f.jeu)));
+void api.invoke<boolean>("jeu:etat").then(setGameMode).catch(() => undefined);
+
 export function startBackground(): void {
   const canvas = el("canvas");
   canvas.id = "bg";
@@ -83,7 +93,7 @@ export function startBackground(): void {
   let last = 0;
   const frame = (now: number) => {
     requestAnimationFrame(frame);
-    if (document.hidden || now - last < 33 || !staticLayer) return;
+    if (document.hidden || gameMode || now - last < 33 || !staticLayer) return;
     last = now;
     const c = rgb();
     g.clearRect(0, 0, canvas.width, canvas.height);
@@ -176,7 +186,8 @@ export function createReactor(size: number | (() => number), label?: string): HT
   let t = 0;
   const frame = (now: number) => {
     requestAnimationFrame(frame);
-    if (document.hidden || now - last < 33 || !wrap.isConnected) return;
+    // Pendant un jeu, la boule ralentit (8 images par seconde) : elle reste lisible sans peser.
+    if (document.hidden || now - last < (gameMode ? 125 : 33) || !wrap.isConnected) return;
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     // Cible de couleur : l'état, sinon le rouge de la surveillance, sinon la couleur de la page (orange en cockpit).

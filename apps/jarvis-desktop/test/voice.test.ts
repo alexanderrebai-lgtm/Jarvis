@@ -98,3 +98,25 @@ TypeError: 'NoneType' object is not callable`;
     expect(summarizePythonError(trace)).toBe("TypeError: 'NoneType' object is not callable (dans chatterbox/mtl_tts.py, ligne 180). Détails : Documents\\Jarvis\\voix\\serveur.log");
   });
 });
+
+describe("voix locale économe", () => {
+  it("ne fait jamais attendre : modèle pas prêt = voix en ligne, chargement en arrière-plan", async () => {
+    const { LocalVoice } = await import("../src/main/local-voice.js");
+    const { mkdtempSync, mkdirSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const path = await import("node:path");
+    const ws = mkdtempSync(path.join(tmpdir(), "voix-"));
+    mkdirSync(path.join(ws, "voix", ".venv", "bin"), { recursive: true });
+    mkdirSync(path.join(ws, "voix", ".venv", "Scripts"), { recursive: true });
+    writeFileSync(path.join(ws, "voix", ".installee"), "x");
+    let fetched = 0;
+    const lv = new LocalVoice(ws, { assetsDir: "x", findPython: async () => undefined, fetchFn: (async () => (fetched++, new Response("RIFF"))) as unknown as typeof fetch });
+    let started = 0;
+    (lv as unknown as { start: () => Promise<boolean> }).start = async () => (started++, false);
+    const t0 = Date.now();
+    expect(await lv.synthesize("Bonjour")).toBeUndefined();
+    expect(Date.now() - t0).toBeLessThan(200);
+    expect(started).toBe(1);
+    expect(fetched).toBe(0);
+  });
+});

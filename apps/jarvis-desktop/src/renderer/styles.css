@@ -452,3 +452,6 @@ body.cockpit .panel h4 b { color: var(--orange); font-weight: 600; }
 .journal-error time { font-size: 11px; opacity: 0.6; }
 .journal-error pre { margin: 4px 0 0; white-space: pre-wrap; font-size: 11px; opacity: 0.85; max-height: 6em; overflow: hidden; }
 @media (max-width: 900px) { .journal-entry { grid-template-columns: 46px 1fr; } .journal-entry .what, .journal-entry .who { grid-column: 2; } }
+
+/* ---------- Mode jeu : animations CSS en pause ---------- */
+body.mode-jeu *, body.mode-jeu *::before, body.mode-jeu *::after { animation-play-state: paused !important; }

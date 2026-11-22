@@ -44,11 +44,32 @@ export class PerfMonitor {
     return this.latest;
   }
 
+  private intervalMs = 3000;
+  private gpuCache: { at: number; data: { controllers: si.Systeminformation.GraphicsControllerData[] } } | undefined;
+
   /** Mesure régulière (toutes les 3 s par défaut) : jauges de l'accueil et page Performances. */
   start(intervalMs = 3000): void {
     if (this.timer) return;
+    this.intervalMs = intervalMs;
     void this.sample();
     this.timer = setInterval(() => void this.sample(), intervalMs);
+  }
+
+  /** Change le rythme des mesures (plus lent pendant un jeu). */
+  setInterval(intervalMs: number): void {
+    if (intervalMs === this.intervalMs && this.timer) return;
+    this.intervalMs = intervalMs;
+    if (this.timer) clearInterval(this.timer);
+    this.timer = setInterval(() => void this.sample(), intervalMs);
+  }
+
+  /** La carte graphique est interrogée au plus toutes les 10 s (sous Windows, chaque mesure lance nvidia-smi). */
+  private async graphics(): Promise<{ controllers: si.Systeminformation.GraphicsControllerData[] }> {
+    const maxAge = this.detailed ? 3_000 : 10_000;
+    if (this.gpuCache && Date.now() - this.gpuCache.at < maxAge) return this.gpuCache.data;
+    const data = await si.graphics().catch(() => ({ controllers: [] as si.Systeminformation.GraphicsControllerData[] }));
+    this.gpuCache = { at: Date.now(), data };
+    return data;
   }
 
   stop(): void {
@@ -63,7 +84,7 @@ export class PerfMonitor {
       const [load, mem, graphics, temp, speed, net] = await Promise.all([
         si.currentLoad(),
         si.mem(),
-        si.graphics().catch(() => ({ controllers: [] as si.Systeminformation.GraphicsControllerData[] })),
+        this.graphics(),
         si.cpuTemperature().catch(() => ({ main: null })),
         si.cpuCurrentSpeed().catch(() => ({ avg: null })),
         si.networkStats().catch(() => [] as si.Systeminformation.NetworkStatsData[]),
