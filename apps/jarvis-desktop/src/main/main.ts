@@ -68,6 +68,7 @@ import { createIntentActions } from "./intent-actions.js";
 import { Updates } from "./updates.js";
 import { ConnectorStore, CONNECTOR_PRESETS, testConnector, type ConnectorInput } from "./connectors.js";
 import { BriefingStore, briefingDue, describeBriefing, toISODate, type Briefing, type BriefingInput } from "./briefings.js";
+import { HealthServer, HealthStore, type MetricType } from "./health.js";
 import { WakeWordEngine } from "./wake-word.js";
 import { MusicPanel } from "./music-panel.js";
 import { createPcCare } from "./pc-care.js";
@@ -602,6 +603,37 @@ const builtinMcp = {
 };
 const connectors = new ConnectorStore(config.dataDir, vault);
 const briefingStore = new BriefingStore(config.dataDir);
+
+// ---------- Santé (montre connectée) ----------
+const healthStore = new HealthStore(config.dataDir);
+let healthServer: HealthServer | undefined;
+let healthTokenCache: string | undefined;
+function healthToken(): string {
+  if (healthTokenCache) return healthTokenCache;
+  const saved = vault.available ? vault.get("sante-jeton") : undefined;
+  healthTokenCache = saved ?? (require("node:crypto").randomBytes(10).toString("hex") as string);
+  if (vault.available && !saved) vault.set("sante-jeton", healthTokenCache);
+  return healthTokenCache;
+}
+function healthPort(): number {
+  const p = Number(env("SANTE_PORT"));
+  return Number.isInteger(p) && p > 1024 && p < 65536 ? p : 8896;
+}
+function lanAddress(): string {
+  const nets = require("node:os").networkInterfaces() as Record<string, Array<{ family: string; internal: boolean; address: string }> | undefined>;
+  for (const list of Object.values(nets)) for (const net of list ?? []) if (net.family === "IPv4" && !net.internal && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(net.address)) return net.address;
+  return "127.0.0.1";
+}
+function healthConnexion(): { active: boolean; url: string; jeton: string } {
+  return { active: env("SANTE_ACTIVE") === "true", url: `http://${lanAddress()}:${healthPort()}/sante`, jeton: env("SANTE_ACTIVE") === "true" ? healthToken() : "" };
+}
+async function startHealth(): Promise<void> {
+  if (env("SANTE_ACTIVE") !== "true") return;
+  healthServer = new HealthServer(healthStore, { port: healthPort(), token: healthToken(), onIngest: (n) => n && actions.add({ outil: "santé", resume: `${n} mesure(s) reçue(s) de la montre`, autorise: true, origine: "automatique" }) });
+  const r = await healthServer.start();
+  if (!r.ok) console.warn("[santé]", r.message);
+}
+
 
 /** Fait la recherche d'un briefing et l'envoie (voix et/ou Telegram). */
 async function runBriefing(b: Briefing): Promise<void> {
@@ -1629,6 +1661,7 @@ ipcMain.handle("memoire:note-supprimer", (_event, id: string) => notes.remove(id
 
 // ---------- Briefings programmés (page Réglages) ----------
 const briefingList = () => ({ briefings: briefingStore.list() });
+ipcMain.handle("forme:lire", (_event, type?: MetricType) => ({ resume: healthStore.summary(), connexion: healthConnexion(), ...(type ? { serie: healthStore.serie(type) } : {}) }));
 ipcMain.handle("briefings:lister", () => briefingList());
 ipcMain.handle("briefings:ajouter", (_event, input: BriefingInput) => {
   try {
@@ -1862,6 +1895,7 @@ void app.whenReady().then(async () => {
   backups.start();
   startBriefings();
   startScreenWatch();
+  void startHealth();
   if (!startupTest) {
     watchdog.start();
     setTimeout(() => void checkLastShutdown().catch((e) => console.warn("[santé]", e)), 2 * 60_000);
@@ -1900,6 +1934,7 @@ void app.whenReady().then(async () => {
 
 app.on("will-quit", () => {
   watchdog.stop();
+  healthServer?.stop();
   globalShortcut.unregisterAll();
   race.stop();
   security.stop();
@@ -2023,4 +2058,4 @@ const intentActions = createIntentActions({ askBrain, backups, env, learning, no
 
 const routineRunner = createRoutineRunner({ actions, agenda, applyDisposition, pages, phone, playWakePlaylist, reply, routines, security, setFlag, setSurveillance, spotify, spotifyHelpers, takeAbsentSince, tapo, wake });
 
-connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings: briefingActions });
+connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings: briefingActions, sante: () => healthStore.phrase() });

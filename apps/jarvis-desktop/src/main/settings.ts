@@ -168,6 +168,16 @@ export const SETTING_GROUPS: SettingGroup[] = [
     actions: [{ id: "claude", libelle: "Se connecter à Claude" }, { id: "ollama", libelle: "Tester l'IA locale" }],
   },
   {
+    id: "sante",
+    titre: "Santé (montre connectée)",
+    description: "Reçois les données de ta montre (pas, rythme cardiaque, sommeil…) sur le PC, sans aucun cloud. Une appli du téléphone les envoie à Jarvis sur le réseau de la maison. L'adresse et le code à mettre dans l'appli sont sur la page « Santé » de Jarvis.",
+    champs: [
+      { cle: "SANTE_ACTIVE", libelle: "Recevoir mes données de santé", type: "choix", options: [{ valeur: "false", libelle: "Non (par défaut)" }, { valeur: "true", libelle: "Oui" }], redemarrage: true },
+      { cle: "SANTE_PORT", libelle: "Port d'écoute (avancé)", type: "nombre", exemple: "8896", redemarrage: true },
+    ],
+    actions: [{ id: "sante-adresse", libelle: "Voir l'adresse pour le téléphone" }],
+  },
+  {
     id: "sauvegardes",
     titre: "Sauvegardes et mises à jour",
     description: "Une sauvegarde est faite chaque nuit dans Documents\\Jarvis\\sauvegardes ; tu peux en envoyer une copie ailleurs.",

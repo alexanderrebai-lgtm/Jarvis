@@ -92,6 +92,7 @@ export interface PlusHost {
     lister: () => string[];
     supprimer: (id: string) => boolean;
   };
+  sante: () => string;
   showImage: (titre: string, file: string, page?: PageId) => Promise<void>;
 }
 
@@ -363,6 +364,7 @@ export function plusTools(h: PlusHost) {
       { sujet: z.string(), heure: z.string().describe("HH:MM, ex. 08:00"), jours: z.array(z.enum(["lun", "mar", "mer", "jeu", "ven", "sam", "dim"])).optional(), canaux: z.array(z.enum(["voix", "telegram"])).optional() },
       safe(async ({ sujet, heure, jours, canaux }) => text(h.briefings.programmer({ sujet, heure, ...(jours ? { jours } : {}), ...(canaux ? { canaux } : {}) }))),
     ),
+    sdkTool("sante_resume", "Dernieres donnees de sante d\u2019Alex (pas, rythme cardiaque, sommeil) recues de sa montre connectee.", {}, safe(async () => text(h.sante())), RO),
     sdkTool("briefing_lister", "Liste les briefings programmés.", {}, safe(async () => text(h.briefings.lister())), RO),
     sdkTool("briefing_supprimer", "Supprime un briefing programmé (par son identifiant, visible dans briefing_lister).", { id: z.string() }, safe(async ({ id }) => text(h.briefings.supprimer(id) ? "Briefing supprimé." : "Briefing introuvable."))),
     sdkTool("pc_sante", "Bilan de santé du PC sur 30 jours : arrêts brutaux (coupure ou écran bleu), erreurs matérielles, plantages du pilote graphique, carte graphique, réglages, avec les causes probables.", {}, safe(async () => text(await h.pc.sante())), RO),

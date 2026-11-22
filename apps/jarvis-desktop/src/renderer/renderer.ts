@@ -6,6 +6,7 @@ import { renderSettings } from "./pages/reglages.js";
 import { renderJournal } from "./pages/journal.js";
 import { renderHealth } from "./pages/sante.js";
 import { renderMemory } from "./pages/memoire.js";
+import { renderForme } from "./pages/forme.js";
 import { renderEngineer } from "./pages/ingenieur.js";
 import { renderPerformance } from "./pages/performances.js";
 import { renderProject } from "./pages/projet.js";
@@ -54,6 +55,9 @@ switch (page) {
     break;
   case "memoire":
     renderMemory(root);
+    break;
+  case "forme":
+    renderForme(root);
     break;
   default:
     renderHome(root);
