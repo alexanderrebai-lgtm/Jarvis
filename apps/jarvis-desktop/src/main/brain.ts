@@ -67,8 +67,10 @@ export interface BrainOptions {
 export interface AskOptions {
   /** Conversation à part (ne touche pas à la conversation principale). */
   separate?: boolean;
-  /** « inconnu » : la voix n'a pas été reconnue, Jarvis ne fait que répondre. */
+  /** « inconnu » : la voix n'a pas été reconnue, Jarvis ne fait que répondre. « restreint » : contenu externe, outils limités à `outils`. */
   trust?: PolicyContext["trust"];
+  /** Avec trust « restreint » : la liste exacte des outils permis (vide = aucun). */
+  outils?: string[];
 }
 
 export class Brain {
@@ -88,7 +90,7 @@ export class Brain {
 
   /** Une demande à la fois ; la suivante attend (comme une vraie conversation). */
   ask(prompt: string, events: BrainEvents = {}, opts: AskOptions = {}): Promise<BrainReply> {
-    const run = () => this.run(prompt, events, opts.separate === true || opts.trust === "inconnu", undefined, opts.trust);
+    const run = () => this.run(prompt, events, opts.separate === true || opts.trust === "inconnu" || opts.trust === "restreint", undefined, opts.trust, opts.outils);
     const next = this.queue.catch(() => undefined).then(run);
     this.queue = next;
     return next;
@@ -111,11 +113,11 @@ export class Brain {
     this.state.write({});
   }
 
-  private async run(prompt: string, events: BrainEvents, separate: boolean, external?: AbortController, trust: PolicyContext["trust"] = "proprietaire"): Promise<BrainReply> {
+  private async run(prompt: string, events: BrainEvents, separate: boolean, external?: AbortController, trust: PolicyContext["trust"] = "proprietaire", outils?: string[]): Promise<BrainReply> {
     const session = separate ? {} : this.state.read();
     const abort = external ?? new AbortController();
     if (!external) this.current = abort;
-    const context: PolicyContext = { trust, workFolder: this.options.workFolder };
+    const context: PolicyContext = { trust, workFolder: this.options.workFolder, ...(outils ? { outilsAutorises: outils } : {}) };
     const options: Options = {
       cwd: this.options.workspace,
       systemPrompt: {

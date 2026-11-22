@@ -162,7 +162,7 @@ export function renderSettings(root: HTMLElement): void {
 
 // ---------- Connecteurs MCP ----------
 
-interface Connector { nom: string; type: "commande" | "web"; commande?: string; arguments?: string[]; url?: string; actif: boolean; secrets: string[] }
+interface Connector { nom: string; type: "commande" | "web"; commande?: string; arguments?: string[]; url?: string; actif: boolean; secrets: string[]; verifie?: { le: string }; bloque?: { raison: string } }
 interface Preset { nom: string; libelle: string; type: "commande" | "web"; commande?: string; url?: string; secrets?: string; aide: string }
 
 /** Connecteurs MCP : des outils en plus pour Claude (Home Assistant, GitHub, un dossier…), branchés sans nouvelle version de Jarvis. */
@@ -198,7 +198,9 @@ function renderConnectors(): HTMLElement {
     list.innerHTML = connectors.length
       ? connectors
           .map(
-            (c) => `<div class="connector ${c.actif ? "" : "off"}"><div class="grow"><b>${esc(c.nom)}</b> <small>${c.type === "web" ? esc(c.url ?? "") : esc([c.commande, ...(c.arguments ?? [])].join(" "))}</small>${c.secrets.length ? `<br><small>Secrets : ${c.secrets.map(esc).join(", ")} (dans le coffre-fort)</small>` : ""}</div>
+            (c) => `<div class="connector ${c.actif && !c.bloque ? "" : "off"}"><div class="grow"><b>${esc(c.nom)}</b> <small>${c.type === "web" ? esc(c.url ?? "") : esc([c.commande, ...(c.arguments ?? [])].join(" "))}</small>${c.secrets.length ? `<br><small>Secrets : ${c.secrets.map(esc).join(", ")} (dans le coffre-fort)</small>` : ""}
+            <br><small>${c.bloque ? `<b style="color:var(--bad, #ff6b6b)">🔒 Bloqué par sécurité</b> : ses outils ont changé depuis ton approbation (${esc(c.bloque.raison)}). Relis, puis approuve si tu lui fais confiance.` : c.verifie ? "🛡 Outils vérifiés : je te préviens et je bloque s'ils changent." : "Pas encore vérifié : clique sur « Tester » pour mémoriser ses outils."}</small></div>
+            ${c.bloque ? `<button class="small primary" data-approve="${esc(c.nom)}">Approuver les changements</button>` : ""}
             <button class="small" data-test="${esc(c.nom)}">Tester</button>
             <button class="small" data-toggle="${esc(c.nom)}" data-on="${!c.actif}">${c.actif ? "Désactiver" : "Activer"}</button>
             <button class="small ghost" data-del="${esc(c.nom)}">Supprimer</button></div>`,
@@ -209,9 +211,18 @@ function renderConnectors(): HTMLElement {
       b.onclick = async () => {
         b.disabled = true;
         say("Connexion en cours…");
-        const r = await api.invoke<{ ok: boolean; message: string; outils: string[] }>("connecteurs:tester", b.dataset.test);
+        const r = await api.invoke<{ ok: boolean; message: string; outils: string[]; connecteurs?: Connector[] }>("connecteurs:tester", b.dataset.test);
         say(`${r.message}${r.outils.length ? ` (${r.outils.slice(0, 12).join(", ")}${r.outils.length > 12 ? "…" : ""})` : ""}`, r.ok);
-        b.disabled = false;
+        if (r.connecteurs) draw(r.connecteurs);
+        else b.disabled = false;
+      };
+    });
+    list.querySelectorAll<HTMLButtonElement>("[data-approve]").forEach((b) => {
+      b.onclick = async () => {
+        if (!window.confirm(`Ce connecteur a modifié ses outils depuis ton approbation.\n\nAs-tu relu ce qui a changé et lui fais-tu confiance ? Sinon, désactive-le ou supprime-le.`)) return;
+        const r = await api.invoke<{ ok: boolean; message?: string; connecteurs: Connector[] }>("connecteurs:approuver", b.dataset.approve);
+        say(r.ok ? "Changements approuvés. Le connecteur est de nouveau utilisable." : r.message ?? "Erreur.", r.ok);
+        draw(r.connecteurs);
       };
     });
     list.querySelectorAll<HTMLButtonElement>("[data-toggle]").forEach((b) => (b.onclick = async () => draw((await api.invoke<{ connecteurs: Connector[] }>("connecteurs:basculer", { nom: b.dataset.toggle, actif: b.dataset.on === "true" })).connecteurs)));

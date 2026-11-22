@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { aChange, comparer, decrire, empreintes, type Difference, type Empreintes, type ToolDef } from "./connector-guard.js";
 import type { Vault } from "./vault.js";
 
 /**
@@ -24,6 +25,10 @@ export interface Connector {
   /** Noms des secrets enregistrés (variables d'environnement ou en-têtes), sans leurs valeurs. */
   secrets: string[];
   ajouteLe: string;
+  /** Empreinte des outils approuvés (voir connector-guard.ts). */
+  verifie?: { empreintes: Empreintes; le: string };
+  /** Les outils ont changé depuis l'approbation : bloqué jusqu'à ce qu'Alex relise et approuve. */
+  bloque?: { raison: string; le: string; nouvelles: Empreintes; diff: Difference };
 }
 
 export interface ConnectorInput {
@@ -181,6 +186,12 @@ export class ConnectorStore {
       secrets: Object.keys(secrets),
       ajouteLe: existing?.ajouteLe ?? new Date().toISOString(),
     };
+    // Même serveur : on garde l'empreinte approuvée. Autre programme ou autre adresse : c'est un autre serveur, on repart de zéro.
+    const memeCible = existing && existing.type === connector.type && existing.url === connector.url && existing.commande === connector.commande && JSON.stringify(existing.arguments ?? []) === JSON.stringify(connector.arguments ?? []);
+    if (memeCible) {
+      if (existing.verifie) connector.verifie = existing.verifie;
+      if (existing.bloque) connector.bloque = existing.bloque;
+    }
     this.write([...all.filter((c) => c.nom !== nom), connector]);
     return connector;
   }
@@ -210,12 +221,53 @@ export class ConnectorStore {
 
   /** Configuration des connecteurs actifs, pour le cerveau (relue à chaque conversation). */
   active(): Record<string, McpConfig> {
-    return Object.fromEntries(this.list().filter((c) => c.actif).map((c) => [c.nom, this.config(c)]));
+    return Object.fromEntries(this.list().filter((c) => c.actif && !c.bloque).map((c) => [c.nom, this.config(c)]));
+  }
+
+  /**
+   * Compare les outils que le serveur annonce avec ceux qu'Alex a approuvés.
+   * - « premiere » : première connexion, on retient l'empreinte (confiance au premier contact) ;
+   * - « identique » : rien n'a bougé ;
+   * - « change » : le connecteur est bloqué jusqu'à approbation.
+   */
+  recordCheck(nom: string, tools: ToolDef[], now = new Date()): { etat: "premiere" | "identique" | "change"; diff?: Difference; resume?: string } {
+    const all = this.list();
+    const c = all.find((x) => x.nom === nom);
+    if (!c) return { etat: "identique" };
+    const actuelles = empreintes(tools);
+    const reference = c.verifie?.empreintes;
+    if (!reference) {
+      c.verifie = { empreintes: actuelles, le: now.toISOString() };
+      this.write(all);
+      return { etat: "premiere" };
+    }
+    const diff = comparer(reference, actuelles);
+    if (!aChange(diff)) {
+      if (c.bloque) delete c.bloque;
+      c.verifie = { empreintes: reference, le: now.toISOString() };
+      this.write(all);
+      return { etat: "identique" };
+    }
+    const resume = decrire(diff);
+    c.bloque = { raison: resume, le: c.bloque?.le ?? now.toISOString(), nouvelles: actuelles, diff };
+    this.write(all);
+    return { etat: "change", diff, resume };
+  }
+
+  /** Alex a relu les changements : la nouvelle version devient la référence. */
+  approve(nom: string, now = new Date()): boolean {
+    const all = this.list();
+    const c = all.find((x) => x.nom === nom);
+    if (!c?.bloque) return false;
+    c.verifie = { empreintes: c.bloque.nouvelles, le: now.toISOString() };
+    delete c.bloque;
+    this.write(all);
+    return true;
   }
 }
 
 /** Se connecte au serveur MCP et liste ses outils (bouton « Tester »). */
-export async function testConnector(config: McpConfig, timeoutMs = 30_000): Promise<{ ok: boolean; message: string; outils: string[] }> {
+export async function testConnector(config: McpConfig, timeoutMs = 30_000): Promise<{ ok: boolean; message: string; outils: string[]; defs?: ToolDef[] }> {
   const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
   const client = new Client({ name: "jarvis", version: "1.0.0" });
   let transport: import("@modelcontextprotocol/sdk/shared/transport.js").Transport;
@@ -231,7 +283,7 @@ export async function testConnector(config: McpConfig, timeoutMs = 30_000): Prom
     await Promise.race([client.connect(transport), timer]);
     const { tools } = await Promise.race([client.listTools(), timer]);
     const names = tools.map((t) => t.name);
-    return { ok: true, message: `Connecté : ${names.length} outil(s) disponible(s) pour Claude.`, outils: names };
+    return { ok: true, message: `Connecté : ${names.length} outil(s) disponible(s) pour Claude.`, outils: names, defs: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) };
   } catch (error) {
     const text = error instanceof Error ? error.message : String(error);
     const hint = /401|403|unauthori[sz]ed|forbidden/i.test(text)

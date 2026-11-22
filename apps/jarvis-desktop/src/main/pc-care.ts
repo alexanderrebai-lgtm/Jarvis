@@ -45,7 +45,7 @@ export function createPcCare(d: PcCareDeps) {
         "Réponds en français, en tutoyant, avec : 1) la cause la plus probable et pourquoi ; 2) au plus 6 actions classées de la plus utile à la moins utile, chacune en une ou deux phrases concrètes ; 3) les sources (liens). " +
         `Quand une action correspond à un bouton de Jarvis, ajoute à la fin de la ligne la balise [action:ID], avec ID parmi : ${allowed}. N'invente pas d'autre balise. Ne propose rien de risqué (overclocking, registre à la main, logiciels douteux).`,
       {},
-      { separate: true },
+      { trust: "restreint", outils: ["WebSearch", "WebFetch"] },
     );
     const ids = [...new Set([...r.text.matchAll(/\[action:([a-z-]+)\]/g)].map((m) => m[1] as HealthActionId).filter((id) => id in HEALTH_ACTIONS))];
     const texte = r.text.replace(/\s*\[action:[a-z-]+\]/g, "").trim();
