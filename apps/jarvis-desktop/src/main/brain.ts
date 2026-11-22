@@ -64,6 +64,8 @@ export interface BrainOptions {
   beforeFileChange?: (file: string) => void;
   /** Après chaque appel à Claude : coût et jetons, avec la source (pour le compteur d'usage). */
   onUsage?: (usage: { source: string; usd?: number | undefined; entree?: number | undefined; sortie?: number | undefined }) => void;
+  /** Dernier mot avant une action permise par la politique : demande l'accord d'Alex pour les actions sensibles (sans réponse : refus). */
+  approuver?: (tool: string, input: Record<string, unknown>, contexte: { source: string; trust: PolicyContext["trust"] }) => Promise<{ ok: boolean; raison?: string }>;
 }
 
 export interface AskOptions {
@@ -135,7 +137,15 @@ export class Brain {
       canUseTool: async (toolName, input) => {
         const decision = decide(toolName, input, context);
         this.options.onDecision?.(toolName, input, decision.allow, decision.reason, trust);
-        return decision.allow ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: decision.reason ?? "Bloqué." };
+        if (!decision.allow) return { behavior: "deny", message: decision.reason ?? "Bloqué." };
+        if (this.options.approuver) {
+          const accord = await this.options.approuver(toolName, input, { source, trust }).catch(() => ({ ok: false, raison: "Demande d'accord impossible." }));
+          if (!accord.ok) {
+            this.options.onDecision?.(toolName, input, false, accord.raison ?? "Pas d'accord d'Alex.", trust);
+            return { behavior: "deny", message: accord.raison ?? "Alex n'a pas approuvé cette action." };
+          }
+        }
+        return { behavior: "allow", updatedInput: input };
       },
       // Les outils de lecture ne passent pas par canUseTool : ce crochet voit tout, et garde une copie des fichiers modifiés.
       hooks: {

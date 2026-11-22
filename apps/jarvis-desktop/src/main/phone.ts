@@ -46,6 +46,11 @@ export class PhoneAlerts {
     await this.call("sendMessage", { chat_id: this.options.chatId, text: message });
   }
 
+  /** Message avec boutons sous le texte (ex. Approuver / Refuser) ; la réponse arrive par la réception Telegram. */
+  async boutons(message: string, rangees: Array<Array<{ text: string; data: string }>>): Promise<void> {
+    await this.call("sendMessage", { chat_id: this.options.chatId, text: message, reply_markup: { inline_keyboard: rangees.map((r) => r.map((b) => ({ text: b.text, callback_data: b.data }))) } });
+  }
+
   async photo(jpeg: Buffer, caption: string): Promise<void> {
     const form = new FormData();
     form.set("chat_id", String(this.options.chatId));

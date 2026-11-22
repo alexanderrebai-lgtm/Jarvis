@@ -42,7 +42,7 @@ type OngletId = (typeof ONGLETS)[number]["id"];
 let actif: OngletId = (localStorage.getItem("jv-onglet") as OngletId | null) ?? "discuter";
 if (!ONGLETS.some((o) => o.id === actif)) actif = "discuter";
 
-app.innerHTML = `<header><h1>JARVIS</h1><span class="badge" id="badge">…</span></header><div id="bandeau"></div><main id="vue"></main><div id="compose-zone"></div><nav id="onglets"></nav>`;
+app.innerHTML = `<header><h1>JARVIS</h1><span class="badge" id="badge">…</span></header><div id="bandeau"></div><div id="approbations"></div><main id="vue"></main><div id="compose-zone"></div><nav id="onglets"></nav>`;
 const vue = document.getElementById("vue")!;
 const zone = document.getElementById("compose-zone")!;
 const nav = document.getElementById("onglets")!;
@@ -270,6 +270,28 @@ async function vueJournal(): Promise<void> {
   vue.querySelector<HTMLButtonElement>("#maj")!.onclick = () => void ouvrir("journal");
 }
 
+// ---------- Demandes d'accord (actions sensibles) ----------
+
+async function rafraichirApprobations(): Promise<void> {
+  const zoneAp = document.getElementById("approbations");
+  if (!zoneAp || niveau !== "chiffre") return;
+  try {
+    const r = await appel<{ attente: Array<{ id: string; outil: string; resume: string; origine: string; expireLe: string }> }>("approbations:lister");
+    zoneAp.innerHTML = r.attente
+      .map((d) => `<div class="banner"><b>🔐 Jarvis demande ton accord</b> <span class="muted">(${esc(d.origine)})</span><br><b>${esc(d.outil)}</b><br><span style="overflow-wrap:anywhere">${esc(d.resume)}</span><div class="seg" style="margin-top:8px"><button class="b primary" data-ap="${esc(d.id)}" data-v="1">Approuver</button><button class="b bad" data-ap="${esc(d.id)}" data-v="0">Refuser</button></div><small class="muted">Sans réponse avant ${heure(d.expireLe)}, c'est refusé.</small></div>`)
+      .join("");
+    zoneAp.querySelectorAll<HTMLButtonElement>("[data-ap]").forEach((b) => {
+      b.onclick = async () => {
+        b.disabled = true;
+        await appel("approbations:repondre", { id: b.dataset.ap, accepte: b.dataset.v === "1" }).catch(() => undefined);
+        void rafraichirApprobations();
+      };
+    });
+  } catch {
+    // injoignable : on réessaiera au prochain tour
+  }
+}
+
 // ---------- Démarrage ----------
 
 async function demarrer(): Promise<void> {
@@ -296,6 +318,8 @@ async function demarrer(): Promise<void> {
     document.getElementById("astuce")?.remove();
   });
   await ouvrir(actif);
+  void rafraichirApprobations();
+  setInterval(() => document.visibilityState === "visible" && void rafraichirApprobations(), 5000);
 }
 
 void demarrer();

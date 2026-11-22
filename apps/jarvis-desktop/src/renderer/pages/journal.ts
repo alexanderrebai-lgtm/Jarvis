@@ -45,10 +45,11 @@ export function renderJournal(root: HTMLElement): void {
   const chips = el("div", "journal-filters");
   list.body.before(chips);
   center.append(list.root);
+  const accords = panel("Demandes d'accord", "", { icon: ICONS.bell, accent: "red", link: false });
   const idees = panel("Idées d'amélioration", "", { icon: ICONS.pulse, accent: "gold", link: false });
   const summary = panel("En bref", "", { icon: ICONS.health, accent: "green" });
   const errors = panel("Erreurs récentes", "grow", { icon: ICONS.bell, accent: "red" });
-  right.append(idees.root, summary.root, errors.root);
+  right.append(accords.root, idees.root, summary.root, errors.root);
   root.append(page);
 
   let data: JournalData | undefined;
@@ -98,6 +99,23 @@ export function renderJournal(root: HTMLElement): void {
       drawIdees(await api.invoke<IdeesData>("ameliorations:lancer"));
     };
   };
+
+  interface Accord { id: string; outil: string; resume: string; origine: string; expireLe: string }
+  const drawAccords = async () => {
+    try {
+      const r = await api.invoke<{ attente: Accord[] }>("approbations:lister");
+      accords.body.innerHTML = r.attente.length
+        ? r.attente.map((d) => `<div class="memory-note" data-ap="${esc(d.id)}"><p><b>${esc(d.outil)}</b> <small>(${esc(d.origine)})</small><br>${esc(d.resume)}<br><small>Sans réponse avant ${esc(new Date(d.expireLe).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }))}, c'est refusé.</small></p><div class="memory-meta"><button class="health-button small" data-v="1">Approuver</button><button class="health-button small" data-v="0">Refuser</button></div></div>`).join("")
+        : '<div class="empty">Aucune demande en attente. (Réglages → Approbation des actions sensibles.)</div>';
+      accords.body.querySelectorAll<HTMLElement>("[data-ap]").forEach((n) => {
+        n.querySelectorAll<HTMLButtonElement>("[data-v]").forEach((b) => (b.onclick = async () => (await api.invoke("approbations:repondre", { id: n.dataset.ap, accepte: b.dataset.v === "1" }), void drawAccords())));
+      });
+    } catch {
+      accords.body.innerHTML = '<div class="empty">Indisponible.</div>';
+    }
+  };
+  void drawAccords();
+  setInterval(() => document.visibilityState === "visible" && void drawAccords(), 4000);
 
   const load = async (day?: string) => {
     void api.invoke<IdeesData>("ameliorations:lire").then(drawIdees);

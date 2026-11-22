@@ -225,6 +225,14 @@ export const SETTING_GROUPS: SettingGroup[] = [
     actions: [{ id: "satellite-adresse", libelle: "Voir l'adresse pour le micro" }],
   },
   {
+    id: "approbation",
+    titre: "Approbation des actions sensibles",
+    description: "Quand Jarvis agit sans personne devant le PC, une action à risque (commande PowerShell, clavier et souris, mise à la corbeille, restauration de sauvegarde…) peut attendre ton accord. Tu approuves depuis le PC, Telegram ou Jarvis Mobile. SANS RÉPONSE EN 3 MINUTES, C'EST REFUSÉ.",
+    champs: [
+      { cle: "APPROBATION", libelle: "Demander mon accord", type: "choix", options: [{ valeur: "off", libelle: "Jamais : Jarvis agit sans demander (par défaut)" }, { valeur: "taches", libelle: "Pour ce que font les tâches de fond (personne n'est là)" }, { valeur: "tout", libelle: "Pour toute action sensible, d'où qu'elle vienne" }], aide: "Les boutons Telegram demandent d'avoir activé « Pouvoir lui répondre par Telegram ». Sans cela, approuve depuis Jarvis Mobile ou la page Journal." },
+    ],
+  },
+  {
     id: "cout",
     titre: "Coût de Claude",
     description: "Jarvis compte chaque appel à Claude (page « Coût ») et te dit ce qui consomme. Les tâches qu'il fait tout seul — surveillance d'écran, briefings, mails importants — tournent en continu : un plafond par jour évite les surprises.",

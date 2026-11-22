@@ -74,6 +74,7 @@ import { SatelliteServer } from "./satellite.js";
 import { avecRelecture, promptRelecteur } from "./relecture.js";
 import { MobileServer, canalAutorise, type Niveau as NiveauMobile } from "./mobile.js";
 import { TelegramInbox } from "./telegram-in.js";
+import { Approbations, exigeApprobation, modeApprobation } from "./approbations.js";
 import { AmeliorationStore, revue as faireRevue } from "./amelioration.js";
 import { createRoutineRunner } from "./routine-runner.js";
 import { createIntentActions } from "./intent-actions.js";
@@ -709,6 +710,13 @@ async function transcrireVocal(audio: Buffer): Promise<string | undefined> {
   return ears.transcribe(new Float32Array(copie.buffer));
 }
 const telegramInbox = new TelegramInbox({
+  surBouton: (data) => {
+    const m = data.match(/^ap:(\w+):([01])$/);
+    if (!m) return;
+    const accepte = m[2] === "1";
+    const ok = approbations.repondre(m[1]!, accepte);
+    void phone.text(ok ? (accepte ? "✅ Approuvé." : "❌ Refusé.") : "Cette demande a déjà été traitée ou a expiré.").catch(() => undefined);
+  },
   token: () => env("TELEGRAM_BOT_TOKEN"),
   chatId: () => env("TELEGRAM_CHAT_ID"),
   actif: () => env("TELEGRAM_RECEPTION") === "true",
@@ -721,6 +729,28 @@ const telegramInbox = new TelegramInbox({
     journal.add({ demande: `(Telegram${origine === "vocal" ? ", vocal" : ""}) ${unmask(texte)}`, reponse, outils: ["Telegram"] });
     return reponse;
   },
+});
+
+// ---------- Approbation des actions sensibles ----------
+const approbations = new Approbations({
+  delaiMs: 180_000,
+  notifier: (d) => {
+    host.notify("Jarvis demande ton accord", `${d.outil} : ${d.resume}`);
+    if (!flags.doNotDisturb && !flags.jeu) say(`${ownerName}, j'ai besoin de ton accord pour une action sensible : ${d.outil}. Regarde ton téléphone ou la page Journal. Sans réponse, je refuse.`);
+    if (phone.enabled && telegramInbox.etat === "ok") {
+      void phone
+        .boutons(`🔐 Jarvis demande ton accord (${d.origine})\n\n${d.outil}\n${d.resume}\n\nSans réponse dans 3 minutes, c'est refusé.`, [[{ text: "✅ Approuver", data: `ap:${d.id}:1` }, { text: "❌ Refuser", data: `ap:${d.id}:0` }]])
+        .catch(() => undefined);
+    }
+  },
+  journaliser: (d) =>
+    actions.add({
+      outil: "approbation",
+      resume: `${d.etat === "approuvee" ? "Approuvé" : d.etat === "refusee" ? "Refusé" : "Sans réponse, refusé"} : ${d.outil} — ${d.resume}`,
+      autorise: d.etat === "approuvee",
+      ...(d.etat !== "approuvee" ? { raison: d.etat === "expiree" ? "Pas de réponse d'Alex dans le délai." : "Refusé par Alex." } : {}),
+      origine: d.origine,
+    }),
 });
 
 // ---------- Jarvis Mobile (l'application web du téléphone) ----------
@@ -984,6 +1014,12 @@ const brain = new Brain({
   mcpServers: () => ({ ...connectors.active(), ...builtinMcp }),
   model: env("CLAUDE_MODEL"),
   onUsage: noteUsage,
+  approuver: async (outil, input, ctx) => {
+    const nom = outil.replace(/^mcp__jarvis(_plus)?__/, "");
+    if (!exigeApprobation(modeApprobation(env("APPROBATION")), nom, ctx.source)) return { ok: true };
+    const accord = await approbations.demander(nom, summarizeInput(outil, input), ctx.source);
+    return accord ? { ok: true } : { ok: false, raison: "Refusé : Alex n'a pas approuvé cette action (ou n'a pas répondu à temps). Ne la retente pas ; dis-lui ce que tu voulais faire." };
+  },
   workFolder: pseudonyms ? workFolder : undefined,
   onDecision: (tool, input, allowed, reason, trust) => actions.add({ outil: tool, resume: summarizeInput(tool, input), autorise: allowed, ...(reason ? { raison: reason } : {}), ...(trust ? { origine: trust } : {}) }),
   beforeFileChange: (file) => {
@@ -1949,6 +1985,8 @@ ipcMain.handle("ameliorations:decider", (_event, payload: { id: string; accepte:
   return { propositions: ameliorations.liste(), derniereRevue: ameliorations.derniereRevue() ?? null };
 });
 ipcMain.handle("ameliorations:lancer", async () => ({ ...(await lancerRevue()), propositions: ameliorations.liste(), derniereRevue: ameliorations.derniereRevue() ?? null }));
+ipcMain.handle("approbations:lister", () => ({ attente: approbations.enAttente(), recentes: approbations.recentes(5) }));
+ipcMain.handle("approbations:repondre", (_event, payload: { id: string; accepte: boolean }) => approbations.repondre(payload.id, payload.accepte === true));
 ipcMain.handle("capacites:lire", () => ({ liste: capaciteListe(), bilan: bilan(capaciteListe()), verifs: verifStore.all(), testables: checks.map((c) => c.id) }));
 ipcMain.handle("cout:lire", () => ({ resume: usage.summary(30), plafond: usagePlafond() ?? null, pauseAuto: env("USAGE_PAUSE_AUTO") !== "off", mode: env("ANTHROPIC_API_KEY") ? "cle-api" : "abonnement" }));
 ipcMain.handle("memoire:ajouter", (_event, fait: string) => (fait?.trim() ? notes.remember(fait.trim()) : null));
