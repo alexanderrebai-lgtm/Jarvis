@@ -192,7 +192,7 @@ export function createPcCare(d: PcCareDeps) {
     // Reconnaissance vocale : petit modèle sur le processeur pendant le jeu.
     ears.setLight(on);
     // Mesures du PC plus espacées.
-    perf.setInterval(on ? 20_000 : 3_000);
+    perf.gameMode = on;
     setLowPriority(on);
     // Température et puissance de la carte graphique notées pendant la partie (utile après un arrêt brutal).
     if (on) gameRecorder.start();

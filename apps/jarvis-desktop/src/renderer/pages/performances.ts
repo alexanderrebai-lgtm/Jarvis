@@ -36,12 +36,13 @@ export function renderPerformance(root: HTMLElement): void {
   root.append(page);
   linkToReactor(page, reactor.querySelector<HTMLElement>(".reactor")!);
 
-  const past: Array<{ cpu: number; gpu?: number; ram: number }> = [];
+  // Historique sur 2 minutes, horodaté : le graphique défile en continu entre deux mesures.
+  const past: Sample[] = [];
   const render = (p: Perf | null) => {
     if (!p) return;
     const g = p.gpu[0];
-    past.push({ cpu: p.cpu.chargePct, ...(g?.chargePct !== undefined ? { gpu: g.chargePct } : {}), ram: p.memoire.pct });
-    if (past.length > 60) past.shift();
+    past.push({ t: Date.now(), cpu: p.cpu.chargePct, ...(g?.chargePct !== undefined ? { gpu: g.chargePct } : {}), ram: p.memoire.pct });
+    while (past.length && Date.now() - past[0]!.t > HISTORY_MS + 5_000) past.shift();
     alerts.className = `chip ${p.alertes.length ? "danger" : ""}`;
     alerts.innerHTML = `<i></i>${esc(p.alertes[0] ?? "Tout va bien")}`;
     rings.innerHTML =
@@ -63,33 +64,63 @@ export function renderPerformance(root: HTMLElement): void {
     disks.body.innerHTML = p.disques.map((d) => `<div class="row"><span>${esc(d.lecteur)}</span><span class="v">${d.libreGo} Go libres</span></div><div class="gauge"><i class="${d.utilisePct > 92 ? "danger" : d.utilisePct > 80 ? "warn" : ""}" style="width:${d.utilisePct}%"></i></div>`).join("");
     net.body.innerHTML = `<div class="row"><span>Réception</span><span class="v strong">${p.reseau.recuMbps} Mb/s</span></div><div class="row"><span>Envoi</span><span class="v strong">${p.reseau.envoyeMbps} Mb/s</span></div>`;
     procs.body.innerHTML = p.processus.map((x) => `<div class="row"><span>${esc(x.nom)}</span><span class="v">${x.cpuPct} % · ${x.memoireMo} Mo</span></div>`).join("");
+  };
+  // Dessin à 30 images/s, seulement quand la page est visible et hors mode jeu.
+  let lastFrame = 0;
+  const frame = (now: number) => {
+    requestAnimationFrame(frame);
+    if (document.hidden || document.body.classList.contains("mode-jeu") || now - lastFrame < 33) return;
+    lastFrame = now;
     draw(canvas, past);
   };
+  requestAnimationFrame(frame);
   api.on("perf:data", render);
   void api.invoke<{ perf: Perf | null }>("page:data", "performances").then((d) => render(d.perf));
 }
 
-function draw(canvas: HTMLCanvasElement, past: Array<{ cpu: number; gpu?: number; ram: number }>): void {
+interface Sample {
+  t: number;
+  cpu: number;
+  gpu?: number;
+  ram: number;
+}
+
+const HISTORY_MS = 120_000;
+
+function draw(canvas: HTMLCanvasElement, past: Sample[]): void {
   const ratio = window.devicePixelRatio || 1;
-  canvas.width = canvas.clientWidth * ratio;
-  canvas.height = canvas.clientHeight * ratio;
+  const width = Math.round(canvas.clientWidth * ratio);
+  const height = Math.round(canvas.clientHeight * ratio);
+  // Redimensionner un canvas vide sa mémoire : seulement si la taille change.
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
   const g = canvas.getContext("2d")!;
-  g.clearRect(0, 0, canvas.width, canvas.height);
-  const series: Array<[keyof (typeof past)[number], string]> = [["cpu", "rgba(159,232,255,0.95)"], ["gpu", "rgba(185,166,255,0.95)"], ["ram", "rgba(125,255,196,0.7)"]];
-  const x = (i: number) => (i / 59) * canvas.width;
-  const y = (v: number) => canvas.height - (v / 100) * (canvas.height - 10 * ratio) - 5 * ratio;
+  g.clearRect(0, 0, width, height);
+  const now = Date.now();
+  const x = (t: number) => width * (1 - (now - t) / HISTORY_MS);
+  const y = (v: number) => height - (v / 100) * (height - 10 * ratio) - 5 * ratio;
+  // Repères à 25, 50 et 75 %.
+  g.strokeStyle = "rgba(160,220,255,0.08)";
+  g.lineWidth = 1;
+  for (const v of [25, 50, 75]) {
+    g.beginPath();
+    g.moveTo(0, y(v));
+    g.lineTo(width, y(v));
+    g.stroke();
+  }
+  const series: Array<[keyof Omit<Sample, "t">, string]> = [["cpu", "rgba(159,232,255,0.95)"], ["gpu", "rgba(185,166,255,0.95)"], ["ram", "rgba(125,255,196,0.7)"]];
   for (const [key, color] of series) {
-    const points = past.map((p, i) => [i + (60 - past.length), p[key]] as const).filter(([, v]) => v !== undefined) as Array<readonly [number, number]>;
+    const points = past.filter((p) => p[key] !== undefined);
     if (points.length < 2) continue;
     g.strokeStyle = color;
     g.lineWidth = 2 * ratio;
-    g.shadowColor = color;
-    g.shadowBlur = 6 * ratio;
+    g.lineJoin = "round";
     g.beginPath();
-    points.forEach(([i, v], n) => (n ? g.lineTo(x(i), y(v)) : g.moveTo(x(i), y(v))));
+    points.forEach((p, n) => (n ? g.lineTo(x(p.t), y(p[key]!)) : g.moveTo(x(p.t), y(p[key]!))));
     g.stroke();
   }
-  g.shadowBlur = 0;
   g.fillStyle = "rgba(220,240,255,0.5)";
   g.font = `${11 * ratio}px Inter`;
   g.fillText("processeur", 8 * ratio, 16 * ratio);
