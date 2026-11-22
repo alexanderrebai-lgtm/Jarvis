@@ -47,7 +47,7 @@ await build({
   minify: true,
   logLevel: "warning",
 });
-for (const f of ["mobile.html", "mobile.css", "manifest.webmanifest", "icon-180.png", "icon-512.png"]) cpSync(path.join("src/mobile", f), path.join(out, "mobile", f));
+for (const f of ["mobile.html", "mobile.css", "manifest.webmanifest", "icon-180.png", "icon-512.png", "sw.js"]) cpSync(path.join("src/mobile", f), path.join(out, "mobile", f));
 
 cpSync("src/renderer/index.html", path.join(out, "renderer", "index.html"));
 cpSync("src/renderer/styles.css", path.join(out, "renderer", "styles.css"));

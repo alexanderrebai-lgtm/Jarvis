@@ -209,9 +209,11 @@ export const SETTING_GROUPS: SettingGroup[] = [
     champs: [
       { cle: "MOBILE_ACTIF", libelle: "Activer Jarvis Mobile", type: "choix", options: [{ valeur: "false", libelle: "Non (par défaut)" }, { valeur: "true", libelle: "Oui" }] },
       { cle: "MOBILE_RESEAU_MAISON", libelle: "Accepter aussi le Wi-Fi de la maison (sans Tailscale)", type: "choix", options: [{ valeur: "false", libelle: "Non : seulement par Tailscale (conseillé)" }, { valeur: "true", libelle: "Oui : lecture limitée et questions seulement" }], aide: "Le Wi-Fi n'est pas chiffré pour cette application : par prudence, dans ce mode le téléphone ne peut ni piloter la maison ni lire ta mémoire ou ton journal. Pour tout faire, utilise Tailscale." },
+      { cle: "MOBILE_NOTIFICATIONS", libelle: "Notifications sur le téléphone", type: "choix", options: [{ valeur: "discret", libelle: "Discrètes : le titre seulement, « Ouvre Jarvis pour voir » (conseillé)" }, { valeur: "complet", libelle: "Avec le détail (visible sur l'écran verrouillé)" }, { valeur: "off", libelle: "Désactivées" }], aide: "Il faut le HTTPS de Tailscale (console d'administration → DNS → « Enable HTTPS ») et, sur iPhone, l'appli ajoutée à l'écran d'accueil. Le message est chiffré : Apple ne peut pas le lire." },
+      { cle: "MOBILE_HTTPS", libelle: "HTTPS avec Tailscale (nécessaire aux notifications)", type: "choix", options: [{ valeur: "auto", libelle: "Automatique (conseillé)" }, { valeur: "non", libelle: "Non : HTTP seulement, sans notifications" }] },
       { cle: "MOBILE_PORT", libelle: "Port (avancé)", type: "nombre", exemple: "8894" },
     ],
-    actions: [{ id: "mobile-telegram", libelle: "Envoyer le lien sur Telegram" }, { id: "mobile-lien", libelle: "Voir le lien d'appairage" }, { id: "mobile-renouveler", libelle: "Renouveler le jeton (déconnecte les téléphones)" }],
+    actions: [{ id: "mobile-telegram", libelle: "Envoyer le lien sur Telegram" }, { id: "mobile-push", libelle: "Tester les notifications" }, { id: "mobile-lien", libelle: "Voir le lien d'appairage" }, { id: "mobile-renouveler", libelle: "Renouveler le jeton (déconnecte les téléphones)" }],
   },
   {
     id: "satellites",

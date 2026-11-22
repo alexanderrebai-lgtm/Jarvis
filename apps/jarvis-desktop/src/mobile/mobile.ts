@@ -148,6 +148,85 @@ async function vueDiscuter(): Promise<void> {
   dessin();
 }
 
+// ---------- Notifications push ----------
+
+function cleVersOctets(base64: string): Uint8Array {
+  const rempli = (base64 + "=".repeat((4 - (base64.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/");
+  const brut = atob(rempli);
+  return Uint8Array.from(brut, (c) => c.charCodeAt(0));
+}
+
+type EtatNotif = { code: "indisponible" | "https" | "installer" | "inactif" | "refuse" | "actif"; message: string };
+
+/** Où en sont les notifications sur ce téléphone, et que faire ? */
+async function etatNotifications(): Promise<EtatNotif> {
+  if (niveau !== "chiffre") return { code: "indisponible", message: "Les notifications demandent la connexion chiffrée (Tailscale)." };
+  const standalone = (navigator as unknown as { standalone?: boolean }).standalone === true || matchMedia("(display-mode: standalone)").matches;
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  if (ios && !standalone) return { code: "installer", message: "Sur iPhone, ajoute d'abord l'appli à l'écran d'accueil (Partager → « Sur l'écran d'accueil »), puis ouvre-la depuis l'icône. iOS 16.4 ou plus." };
+  if (!window.isSecureContext) return { code: "https", message: "Les notifications demandent une adresse en https. Active le HTTPS dans Tailscale (console d'administration → DNS), redémarre Jarvis, puis rouvre le nouveau lien d'appairage." };
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return { code: "indisponible", message: "Ce navigateur ne gère pas les notifications." };
+  if (Notification.permission === "denied") return { code: "refuse", message: "Les notifications sont refusées pour Jarvis : réactive-les dans les Réglages de l'iPhone → Notifications → Jarvis." };
+  const reg = await navigator.serviceWorker.getRegistration();
+  const sub = await reg?.pushManager.getSubscription();
+  return sub ? { code: "actif", message: "Les notifications sont activées sur ce téléphone." } : { code: "inactif", message: "Reçois les alertes de Jarvis (surveillance, accords demandés, tâches terminées) même quand l'appli est fermée." };
+}
+
+async function activerNotifications(): Promise<string> {
+  const permission = await Notification.requestPermission(); // doit venir d'un geste de l'utilisateur
+  if (permission !== "granted") return "Notifications refusées.";
+  const reg = await navigator.serviceWorker.register("/sw.js");
+  await navigator.serviceWorker.ready;
+  const r = await fetch("/api/push/cle", { credentials: "same-origin" });
+  if (!r.ok) throw new Error("Le PC n'accepte pas les notifications sur cette connexion.");
+  const { cle } = (await r.json()) as { cle: string };
+  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: cleVersOctets(cle) as BufferSource });
+  await poster("/api/push/abonner", { subscription: sub.toJSON() });
+  return "Notifications activées.";
+}
+
+async function desactiverNotifications(): Promise<void> {
+  const reg = await navigator.serviceWorker.getRegistration();
+  const sub = await reg?.pushManager.getSubscription();
+  if (!sub) return;
+  await poster("/api/push/desabonner", { endpoint: sub.endpoint }).catch(() => undefined);
+  await sub.unsubscribe();
+}
+
+async function carteNotifications(): Promise<string> {
+  const e = await etatNotifications();
+  const bouton =
+    e.code === "inactif" ? `<button class="b primary" data-notif="on">Activer les notifications</button>` : e.code === "actif" ? `<button class="b" data-notif="test">Envoyer un test</button> <button class="b bad" data-notif="off">Désactiver</button>` : "";
+  return `<div class="card"><h2>Notifications</h2><p>${esc(e.message)}</p>${bouton}<p class="muted" id="notif-msg"></p></div>`;
+}
+
+function brancherNotifications(): void {
+  vue.querySelectorAll<HTMLButtonElement>("[data-notif]").forEach((b) => {
+    b.onclick = async () => {
+      const msg = vue.querySelector<HTMLElement>("#notif-msg");
+      b.disabled = true;
+      try {
+        if (b.dataset.notif === "on") msg!.textContent = await activerNotifications();
+        else if (b.dataset.notif === "off") await desactiverNotifications();
+        else if (b.dataset.notif === "test") {
+          const r = await appel<{ envoyes: number; erreurs: string[] }>("push:tester");
+          msg!.textContent = r.envoyes ? "Test envoyé : la notification arrive dans quelques secondes." : `Rien n'est parti${r.erreurs?.length ? ` (${r.erreurs[0]})` : " : aucun téléphone abonné"}.`;
+          b.disabled = false;
+          return;
+        }
+        void ouvrir("etat");
+      } catch (e) {
+        const brut = e instanceof Error ? e.message : String(e);
+        // Les messages du navigateur sont en anglais et cryptiques : on explique en français.
+        msg!.textContent = /push service|permission denied|AbortError|registration failed/i.test(brut)
+          ? "Le téléphone n'a pas pu joindre son service de notifications (réseau, ou permission refusée). Vérifie la connexion et les Réglages de l'iPhone → Notifications → Jarvis, puis réessaie."
+          : brut;
+        b.disabled = false;
+      }
+    };
+  });
+}
+
 // ---------- État ----------
 
 async function vueEtat(): Promise<void> {
@@ -172,8 +251,10 @@ async function vueEtat(): Promise<void> {
     const m = forme.value.resume as any[];
     html += `<div class="card"><h2>Ma forme</h2>${m.length ? `<div class="tiles">${m.map((x) => `<div class="tile"><div class="v">${esc(x.valeur)}<small>${esc(x.unite)}</small></div>${esc(x.libelle)}</div>`).join("")}</div>` : `<p class="muted">Aucune donnée de ta montre pour l'instant.</p>`}</div>`;
   }
-  vue.innerHTML = `${html || erreurVue("Rien à afficher.")}<p style="text-align:center"><button class="b" id="maj">Actualiser</button></p>`;
+  const carteNotif = await carteNotifications().catch(() => "");
+  vue.innerHTML = `${carteNotif}${html || erreurVue("Rien à afficher.")}<p style="text-align:center"><button class="b" id="maj">Actualiser</button></p>`;
   vue.querySelector<HTMLButtonElement>("#maj")!.onclick = () => void ouvrir("etat");
+  brancherNotifications();
 }
 
 // ---------- Maison ----------

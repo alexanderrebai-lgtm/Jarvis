@@ -16,10 +16,10 @@ import type { JarvisServices } from "./main.js";
  * Boutons de la page Réglages : tester la météo, les ampoules, les caméras, Telegram ; connecter Google, Spotify, Claude ; installer la voix locale ; sauvegarder, restaurer, chercher une mise à jour.
  */
 
-export type SettingActionsDeps = Pick<JarvisServices, "healthConnexion" | "satelliteConnexion" | "mobileLiens" | "mobileRenouveler" | "agenda" | "backups" | "checkUpdates" | "conversation" | "env" | "envFile" | "handleCommand" | "host" | "localAI" | "localVoice" | "phone" | "planning" | "reply" | "say" | "settings" | "spotifyHelpers" | "tapo" | "tapoCache" | "vault" | "wake" | "weather" | "workspace">;
+export type SettingActionsDeps = Pick<JarvisServices, "healthConnexion" | "satelliteConnexion" | "mobileLiens" | "mobileRenouveler" | "pushTesterMessage" | "agenda" | "backups" | "checkUpdates" | "conversation" | "env" | "envFile" | "handleCommand" | "host" | "localAI" | "localVoice" | "phone" | "planning" | "reply" | "say" | "settings" | "spotifyHelpers" | "tapo" | "tapoCache" | "vault" | "wake" | "weather" | "workspace">;
 
 export function createSettingActions(d: SettingActionsDeps) {
-  const { healthConnexion, satelliteConnexion, mobileLiens, mobileRenouveler, agenda, backups, checkUpdates, conversation, env, envFile, handleCommand, host, localAI, localVoice, phone, planning, reply, say, settings, spotifyHelpers, tapo, tapoCache, vault, wake, weather, workspace } = d;
+  const { healthConnexion, satelliteConnexion, mobileLiens, mobileRenouveler, pushTesterMessage, agenda, backups, checkUpdates, conversation, env, envFile, handleCommand, host, localAI, localVoice, phone, planning, reply, say, settings, spotifyHelpers, tapo, tapoCache, vault, wake, weather, workspace } = d;
   /** Une image d'une caméra (pour le bouton « Tester »). */
   function grabCameraFrame(ip: string, user: string, password: string): Promise<string | undefined> {
     const bin = (ffmpegPath as unknown as string | null) ?? undefined;
@@ -175,6 +175,8 @@ export function createSettingActions(d: SettingActionsDeps) {
           await phone.text(`Jarvis Mobile — ouvre ce lien sur ton téléphone, une seule fois (puis « Partager » → « Sur l'écran d'accueil ») :\n\n${texte}\n\nNe le partage avec personne : il donne accès à Jarvis. Tu pourras le renouveler depuis les réglages.`);
           return { ok: true, message: "Lien envoyé sur Telegram. Ouvre-le sur le téléphone." };
         }
+        case "mobile-push":
+          return pushTesterMessage();
         case "mobile-renouveler":
           await mobileRenouveler();
           return { ok: true, message: "Nouveau jeton créé : les téléphones déjà appairés sont déconnectés. Envoie-toi le nouveau lien." };

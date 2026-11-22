@@ -143,7 +143,7 @@ describe("jarvis mobile : serveur", () => {
   it("accepte l'en-tête x-jeton pour les outils, et refuse de démarrer avec un jeton trop court", async () => {
     const s = await demarre();
     expect((await fetch(`${s.chiffre}/api/etat`, { headers: { "x-jeton": TOKEN } })).status).toBe(200);
-    expect(await (await fetch(`${s.chiffre}/api/etat`, { headers: { "x-jeton": TOKEN } })).json()).toEqual({ ok: true, niveau: "chiffre", version: "9.9.9" });
+    expect(await (await fetch(`${s.chiffre}/api/etat`, { headers: { "x-jeton": TOKEN } })).json()).toMatchObject({ ok: true, niveau: "chiffre", version: "9.9.9", https: false });
     const court = new MobileServer({ token: "abc", ecoutes: [], dossier: ".", invoke: async () => null, demander: async () => "" });
     expect((await court.start()).ok).toBe(false);
   });

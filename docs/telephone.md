@@ -38,6 +38,33 @@ ordinateur. Chaque action faite depuis le téléphone est notée dans le Journal
 Si le lien ne s'ouvre pas : le PC est-il allumé, Tailscale est-il actif sur le
 téléphone ? Jarvis revérifie les adresses toute les minutes.
 
+## Notifications sur le téléphone (push)
+
+Pour recevoir les alertes de Jarvis (surveillance, demande d'accord, tâche
+terminée…) même quand l'appli est fermée. Elles demandent une adresse en
+**https** : Tailscale la fournit gratuitement.
+
+1. **Console d'administration Tailscale** (login.tailscale.com) → **DNS** :
+   active **MagicDNS** et **« Enable HTTPS »**.
+2. Redémarre Jarvis. Il demande le certificat à Tailscale tout seul (et le
+   renouvelle avant la fin). Le **lien d'appairage devient « https://… »** :
+   envoie-toi le nouveau lien (« Envoyer le lien sur Telegram ») et rouvre-le
+   sur le téléphone (une adresse différente = un nouvel appairage).
+3. **Sur iPhone** : ajoute l'appli à l'écran d'accueil (iOS 16.4 ou plus), puis
+   ouvre-la **depuis l'icône**. Onglet **État** → **« Activer les
+   notifications »** → accepte.
+4. Sur le PC : Réglages → Téléphone → **« Tester les notifications »**.
+
+Par défaut les notifications sont **discrètes** : le titre seulement (« Alerte
+surveillance »), puis « Ouvre Jarvis pour voir », parce qu'une notification
+s'affiche sur l'écran verrouillé. Tu peux choisir « avec le détail » ou les
+désactiver (Réglages → Téléphone). Le message est **chiffré** de bout en bout :
+Apple ne peut pas le lire. En « ne pas déranger », seules les alertes critiques
+(surveillance, accord demandé, connecteur bloqué) passent.
+
+Si ça ne marche pas : le test de bout en bout (« Tester chez moi ») dit si le HTTPS
+est prêt et combien de téléphones sont abonnés.
+
 ## Les deux niveaux de connexion
 
 - **Chiffré (Tailscale)** : contrôle complet (tous les onglets).
@@ -78,9 +105,11 @@ téléphone/serveur) utilise le même bot, Jarvis Windows signale un conflit.
 
 ## Limites actuelles
 
-- Pas de notifications push sur le téléphone (elles demandent HTTPS et une
-  installation plus lourde) : les alertes de la surveillance continuent d'arriver
-  par **Telegram**.
+- Les notifications push n'ont **pas pu être essayées sur un vrai iPhone** : le
+  chiffrement (RFC 8291) et la signature sont vérifiés par des tests, et le service
+  worker affiche bien un message qu'on lui livre dans un vrai navigateur ; mais la
+  remise par le service d'Apple et le certificat Tailscale réel restent à valider chez
+  toi. Les alertes de la surveillance continuent d'arriver aussi par **Telegram**.
 - Le PC doit être **allumé** et Jarvis lancé.
 - Pas de conversation vocale en continu depuis l'appli : dicte avec le clavier, ou envoie un vocal par Telegram.
 - Je l'ai testé avec un iPhone **émulé** sur un PC de test (appairage, onglets,

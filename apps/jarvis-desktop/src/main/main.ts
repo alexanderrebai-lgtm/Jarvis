@@ -3,7 +3,7 @@ import { cpus, totalmem } from "node:os";
 import path from "node:path";
 import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, Notification, powerSaveBlocker, protocol, safeStorage, screen, shell, Tray } from "electron";
 import ffmpegPath from "ffmpeg-static";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { WebBrowser } from "@muscu/jarvis/src/browser.js";
 import { readConfig } from "@muscu/jarvis/src/config.js";
 import { AgendaService } from "@muscu/jarvis/src/google/agenda.js";
@@ -76,6 +76,8 @@ import { MobileServer, canalAutorise, type Niveau as NiveauMobile } from "./mobi
 import { TelegramInbox } from "./telegram-in.js";
 import { Approbations, exigeApprobation, modeApprobation } from "./approbations.js";
 import { RangementStore, reviser as reviserMemoire } from "./rangement.js";
+import { PushService, type ContenuPush } from "./push.js";
+import { doitRenouveler, obtenirCertificat, type Certificat } from "./tailscale.js";
 import { AmeliorationStore, revue as faireRevue } from "./amelioration.js";
 import { createRoutineRunner } from "./routine-runner.js";
 import { createIntentActions } from "./intent-actions.js";
@@ -525,7 +527,10 @@ const host: DesktopHost = {
   captureCameras,
   workspace,
   show: showPanel,
-  notify: (title, body) => new Notification({ title, body: unmask(body), icon: path.join(assets, "icon.png") }).show(),
+  notify: (title, body) => {
+    new Notification({ title, body: unmask(body), icon: path.join(assets, "icon.png") }).show();
+    pousserSurTelephone(title, unmask(body));
+  },
   pages: {
     open: (page, ecran) => void pages.openPage(page, ecran),
     openMany: (ids) => void pages.openPages(ids),
@@ -754,6 +759,56 @@ const approbations = new Approbations({
     }),
 });
 
+// ---------- Notifications push sur le téléphone ----------
+const pushService = new PushService({
+  dataDir: config.dataDir,
+  secret: vault.available ? vault : undefined,
+  contenu: (): ContenuPush => (env("MOBILE_NOTIFICATIONS") === "off" ? "off" : env("MOBILE_NOTIFICATIONS") === "complet" ? "complet" : "discret"),
+});
+/** Alertes qui passent même en « ne pas déranger » et sortent tout de suite. */
+const NOTIFS_CRITIQUES = /^(Alerte surveillance|Jarvis demande ton accord|Connecteur bloqué|Mouvement détecté)/;
+function pousserSurTelephone(titre: string, corps: string): void {
+  if (env("MOBILE_ACTIF") !== "true" || pushService.nombre() === 0) return;
+  const critique = NOTIFS_CRITIQUES.test(titre);
+  if (flags.doNotDisturb && !critique) return;
+  void pushService.envoyer({ titre, corps, urgent: critique, tag: titre.slice(0, 40) }).catch((e) => console.warn("[push]", e));
+}
+
+/** Certificat HTTPS de Tailscale (nécessaire aux notifications) : demandé quand Tailscale est là, renouvelé avant la fin. */
+let tsTls: Certificat | undefined;
+let tsRaison: string | undefined;
+let tsTentative = 0;
+function trouverTailscale(): string {
+  const windows = "C:\\Program Files\\Tailscale\\tailscale.exe";
+  return process.platform === "win32" && existsSync(windows) ? windows : "tailscale";
+}
+const executer = (programme: string, args: string[]) =>
+  new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+    execFile(programme, args, { windowsHide: true, timeout: 30_000 }, (erreur, stdout, stderr) => resolve({ code: erreur ? ((erreur as { code?: number }).code ?? 1) : 0, stdout: String(stdout), stderr: String(stderr || erreur?.message || "") }));
+  });
+async function rafraichirTls(): Promise<void> {
+  if (env("MOBILE_HTTPS") === "non" || !adresseTailscale(networks())) {
+    tsTls = undefined;
+    return;
+  }
+  if (!doitRenouveler(tsTls, Date.now()) || Date.now() - tsTentative < 30 * 60_000) return;
+  tsTentative = Date.now();
+  const dossier = path.join(config.dataDir, "tailscale");
+  mkdirSync(dossier, { recursive: true });
+  const r = await obtenirCertificat({ exec: executer, lire: async (f) => readFileSync(f, "utf8"), dossier, programme: trouverTailscale() });
+  if (r.ok) {
+    tsTls = r.certificat;
+    tsRaison = undefined;
+  } else tsRaison = r.raison;
+}
+async function pushTesterMessage(): Promise<{ ok: boolean; message: string }> {
+  if (env("MOBILE_ACTIF") !== "true") return { ok: false, message: "Active d'abord Jarvis Mobile." };
+  if (!tsTls) return { ok: false, message: `HTTPS indisponible : ${tsRaison ?? "Tailscale n'est pas détecté sur ce PC"}. Les notifications d'un iPhone demandent une adresse en https.` };
+  if (!pushService.nombre()) return { ok: false, message: "Aucun téléphone n'est abonné : ouvre Jarvis Mobile sur le téléphone (onglet État) et appuie sur « Activer les notifications »." };
+  const r = await pushService.envoyer({ titre: "Jarvis", corps: "Notification de test : ça marche ✅", tag: "test" }, { forcer: true });
+  return r.envoyes ? { ok: true, message: `Notification envoyée à ${r.envoyes} téléphone(s).` } : { ok: false, message: `Rien n'est parti (${r.erreurs[0] ?? "erreur"}).` };
+}
+
 // ---------- Jarvis Mobile (l'application web du téléphone) ----------
 
 /** Tous les canaux de l'interface, pour que le téléphone appelle les mêmes (sous liste blanche, voir mobile.ts). */
@@ -773,13 +828,13 @@ function mobilePort(): number {
   return Number.isInteger(p) && p > 1024 && p < 65536 ? p : 8894;
 }
 /** Où écouter : sur Tailscale (chiffré, contrôle complet) et, si tu l'autorises, sur le Wi-Fi de la maison (clair, lecture limitée). */
-function mobileEcoutes(): Array<{ host: string; port: number; niveau: NiveauMobile }> {
+function mobileEcoutes(): Array<{ host: string; port: number; niveau: NiveauMobile; tls?: { cert: string; key: string }; domaine?: string }> {
   if (env("MOBILE_ACTIF") !== "true") return [];
   const nets = networks();
   const port = mobilePort();
-  const out: Array<{ host: string; port: number; niveau: NiveauMobile }> = [];
+  const out: Array<{ host: string; port: number; niveau: NiveauMobile; tls?: { cert: string; key: string }; domaine?: string }> = [];
   const ts = adresseTailscale(nets);
-  if (ts) out.push({ host: ts, port, niveau: "chiffre" });
+  if (ts) out.push({ host: ts, port, niveau: "chiffre", ...(tsTls ? { tls: { cert: tsTls.cert, key: tsTls.key }, domaine: tsTls.domaine } : {}) });
   const lan = adresseMaison(nets);
   if (env("MOBILE_RESEAU_MAISON") === "true" && lan) out.push({ host: lan, port, niveau: "maison" });
   // Essais sur ce PC seulement (développement) : adresse locale, niveau chiffré.
@@ -787,6 +842,7 @@ function mobileEcoutes(): Array<{ host: string; port: number; niveau: NiveauMobi
   return out;
 }
 async function refreshMobile(): Promise<void> {
+  await rafraichirTls().catch((e) => console.warn("[tailscale]", e));
   const ecoutes = mobileEcoutes();
   const cle = JSON.stringify(ecoutes);
   if (cle === mobileEcoutesActuelles && (mobileServer || !ecoutes.length)) return;
@@ -800,6 +856,7 @@ async function refreshMobile(): Promise<void> {
     ecoutes,
     dossier: path.join(__dirname, "mobile"),
     version: app.getVersion(),
+    push: { cle: () => pushService.cle(), abonner: (s) => pushService.abonner(s), desabonner: (e) => pushService.desabonner(e) },
     invoke: async (canal, payload) => {
       const h = ipcHandlers.get(canal);
       if (!h) throw new Error("Canal inconnu.");
@@ -824,7 +881,7 @@ function startMobile(): void {
 }
 function mobileLiens(): { actif: boolean; liens: Array<{ niveau: NiveauMobile; url: string }> } {
   const token = secretToken("mobile-jeton");
-  return { actif: env("MOBILE_ACTIF") === "true", liens: mobileEcoutes().map((e) => ({ niveau: e.niveau, url: `http://${e.host}:${e.port}/?jeton=${token}` })) };
+  return { actif: env("MOBILE_ACTIF") === "true", liens: mobileEcoutes().map((e) => ({ niveau: e.niveau, url: e.tls && e.domaine ? `https://${e.domaine}:${e.port}/?jeton=${token}` : `http://${e.host}:${e.port}/?jeton=${token}` })) };
 }
 /** Nouveau jeton : les téléphones déjà appairés sont déconnectés et doivent rouvrir un nouveau lien. */
 async function mobileRenouveler(): Promise<void> {
@@ -2009,6 +2066,8 @@ ipcMain.handle("ameliorations:decider", (_event, payload: { id: string; accepte:
   return { propositions: ameliorations.liste(), derniereRevue: ameliorations.derniereRevue() ?? null };
 });
 ipcMain.handle("ameliorations:lancer", async () => ({ ...(await lancerRevue()), propositions: ameliorations.liste(), derniereRevue: ameliorations.derniereRevue() ?? null }));
+ipcMain.handle("push:etat", () => ({ abonnes: pushService.nombre(), https: !!tsTls, domaine: tsTls?.domaine ?? null, raison: tsRaison ?? null }));
+ipcMain.handle("push:tester", () => pushService.envoyer({ titre: "Jarvis", corps: "Notification de test : ça marche ✅", tag: "test" }, { forcer: true }));
 ipcMain.handle("rangement:lire", () => rangementVue());
 ipcMain.handle("rangement:decider", (_event, payload: { id: string; accepte: boolean }) => {
   const p = rangement.decider(payload.id, payload.accepte === true, notes);
@@ -2395,6 +2454,7 @@ export interface JarvisServices {
   satelliteConnexion: typeof satelliteConnexion;
   mobileLiens: typeof mobileLiens;
   mobileRenouveler: typeof mobileRenouveler;
+  pushTesterMessage: typeof pushTesterMessage;
   launchRoutine: typeof launchRoutine;
   learning: typeof learning;
   library: typeof library;
@@ -2455,7 +2515,7 @@ export interface JarvisServices {
 
 const diagnostics = createDiagnostics({ localAI, ears, env, localVoice, voice, voiceLock, agenda, tapo, security, phone, spotify, planning, wake, backups, vault, lab, library, micro, perf, secretCopyDate, wakeWordStatus, senses: () => senses, updateStatus: () => updates.status, gpuPreferenceNote: () => pcCare.gpuNote(), hardware: () => hardware, tuning: () => tuning, movedSecrets: () => movedSecrets });
 
-const settingActions = createSettingActions({ healthConnexion, satelliteConnexion, mobileLiens, mobileRenouveler, agenda, backups, checkUpdates, conversation, env, envFile, handleCommand, host, localAI, localVoice, phone, planning, reply, say, settings, spotifyHelpers, tapo, tapoCache, vault, wake, weather, workspace });
+const settingActions = createSettingActions({ healthConnexion, satelliteConnexion, mobileLiens, mobileRenouveler, pushTesterMessage, agenda, backups, checkUpdates, conversation, env, envFile, handleCommand, host, localAI, localVoice, phone, planning, reply, say, settings, spotifyHelpers, tapo, tapoCache, vault, wake, weather, workspace });
 
 const pcCare = createPcCare({ actions, brain, broadcast, config, ears, env, flags, games, host, localAI, localVoice, ownerName, pages, perf, race, updateTray, workspace, hardware: () => hardware, tuning: () => tuning });
 
@@ -2582,7 +2642,11 @@ const checks: CheckDef[] = [
       if (env("MOBILE_ACTIF") !== "true") return vNon("Désactivé.");
       const e = mobileEcoutes();
       if (!e.length) return { etat: "attention", detail: "Activé, mais aucune adresse disponible.", conseil: "Installe Tailscale sur le PC et le téléphone (même compte), ou autorise le Wi-Fi de la maison." };
-      return mobileServer ? vOk(`À l'écoute : ${e.map((x) => (x.niveau === "chiffre" ? "Tailscale (chiffré)" : "Wi-Fi (limité)")).join(", ")}.`) : { etat: "echec", detail: "Le serveur ne tourne pas.", conseil: "Redémarre Jarvis." };
+      if (!mobileServer) return { etat: "echec", detail: "Le serveur ne tourne pas.", conseil: "Redémarre Jarvis." };
+      const base = `À l'écoute : ${e.map((x) => (x.niveau === "chiffre" ? `Tailscale (chiffré${x.tls ? ", HTTPS" : ""})` : "Wi-Fi (limité)")).join(", ")}.`;
+      if (env("MOBILE_NOTIFICATIONS") === "off") return vOk(base);
+      if (!tsTls) return { etat: "attention", detail: `${base} Notifications indisponibles : ${tsRaison ?? "Tailscale non détecté"}.`, conseil: "Installe Tailscale et active le HTTPS (console d'administration → DNS → « Enable HTTPS »)." };
+      return pushService.nombre() ? vOk(`${base} Notifications : ${pushService.nombre()} téléphone(s) abonné(s).`) : { etat: "attention", detail: `${base} HTTPS prêt, mais aucun téléphone abonné aux notifications.`, conseil: "Sur le téléphone : Jarvis Mobile → État → « Activer les notifications »." };
     },
   },
   {

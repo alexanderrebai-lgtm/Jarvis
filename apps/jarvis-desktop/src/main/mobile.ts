@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer as createHttps } from "node:https";
 import path from "node:path";
 
 /**
@@ -24,12 +25,12 @@ export type Niveau = "chiffre" | "maison";
 /** Lecture seule, permise partout (réseau de la maison compris) : rien de personnel. */
 export const LECTURE_MAISON = ["capacites:lire", "cout:lire", "forme:lire", "jeu:etat"];
 /** Lecture complète : seulement par le réseau chiffré. */
-export const LECTURE_CHIFFRE = [...LECTURE_MAISON, "page:data", "journal:lire", "connecteurs:lister", "memoire:lire", "briefings:lister", "ameliorations:lire", "musique:etat", "approbations:lister", "rangement:lire"];
+export const LECTURE_CHIFFRE = [...LECTURE_MAISON, "page:data", "journal:lire", "connecteurs:lister", "memoire:lire", "briefings:lister", "ameliorations:lire", "musique:etat", "approbations:lister", "rangement:lire", "push:etat"];
 /** Actions : seulement par le réseau chiffré. Ni réglages, ni création de connecteurs, ni actions système du PC. */
 export const ECRITURE_CHIFFRE = [
   "tapo:toggle", "securite:armer", "securite:mode", "reveil:passer", "musique:commande",
   "memoire:ajouter", "memoire:modifier", "memoire:oublier", "memoire:note-supprimer", "rappel:retour",
-  "ameliorations:decider", "ameliorations:lancer", "briefings:ajouter", "briefings:basculer", "briefings:supprimer", "approbations:repondre", "rangement:decider", "rangement:annuler", "rangement:lancer",
+  "ameliorations:decider", "ameliorations:lancer", "briefings:ajouter", "briefings:basculer", "briefings:supprimer", "approbations:repondre", "rangement:decider", "rangement:annuler", "rangement:lancer", "push:tester",
 ];
 
 export function canalAutorise(canal: string, niveau: Niveau): "lecture" | "ecriture" | undefined {
@@ -60,12 +61,16 @@ const FICHIERS: Record<string, { fichier: string; type: string; public?: boolean
   "/manifest.webmanifest": { fichier: "manifest.webmanifest", type: "application/manifest+json", public: true },
   "/icon-180.png": { fichier: "icon-180.png", type: "image/png", public: true },
   "/icon-512.png": { fichier: "icon-512.png", type: "image/png", public: true },
+  // Le service worker reçoit les notifications ; il ne contient aucun secret.
+  "/sw.js": { fichier: "sw.js", type: "text/javascript; charset=utf-8", public: true },
 };
 
 export interface MobileOptions {
   token: string;
   /** Une écoute par chemin d'accès : l'adresse (Tailscale ou maison), son port, son niveau de confiance. */
-  ecoutes: Array<{ host: string; port: number; niveau: Niveau }>;
+  ecoutes: Array<{ host: string; port: number; niveau: Niveau; /** HTTPS (nécessaire aux notifications) : certificat et clé. */ tls?: { cert: string; key: string } }>;
+  /** Notifications push (niveau chiffré seulement). */
+  push?: { cle: () => string; abonner: (abonnement: unknown) => boolean; desabonner: (endpoint: string) => void };
   /** Dossier des fichiers de l'application (dist/mobile). */
   dossier: string;
   /** Appelle un canal de Jarvis (déjà filtré par la liste blanche). */
@@ -93,12 +98,13 @@ export class MobileServer {
     return this.options.maintenant?.() ?? Date.now();
   }
 
-  async start(): Promise<{ ok: boolean; message: string; ecoutes: Array<{ host: string; port: number; niveau: Niveau }> }> {
+  async start(): Promise<{ ok: boolean; message: string; ecoutes: Array<{ host: string; port: number; niveau: Niveau; tls?: { cert: string; key: string } }> }> {
     if (!this.options.token || this.options.token.length < 16) return { ok: false, message: "jeton trop court : le serveur mobile ne démarre pas", ecoutes: [] };
-    const demarrees: Array<{ host: string; port: number; niveau: Niveau }> = [];
+    const demarrees: Array<{ host: string; port: number; niveau: Niveau; tls?: { cert: string; key: string } }> = [];
     const erreurs: string[] = [];
     for (const e of this.options.ecoutes) {
-      const serveur = createServer((req, res) => void this.repondre(req, res, e.niveau).catch(() => this.fin(res, 500, "erreur")));
+      const gestionnaire = (req: IncomingMessage, res: ServerResponse) => void this.repondre(req, res, e.niveau, !!e.tls).catch(() => this.fin(res, 500, "erreur"));
+      const serveur = e.tls ? createHttps({ cert: e.tls.cert, key: e.tls.key }, gestionnaire) : createServer(gestionnaire);
       const ok = await new Promise<boolean>((resolve) => {
         serveur.once("error", (err) => {
           erreurs.push(`${e.host}:${e.port} ${err instanceof Error ? err.message : err}`);
@@ -111,7 +117,7 @@ export class MobileServer {
         demarrees.push(e);
       }
     }
-    return { ok: demarrees.length > 0, message: demarrees.length ? `à l'écoute : ${demarrees.map((d) => `${d.host}:${d.port} (${d.niveau})`).join(", ")}${erreurs.length ? ` ; échec : ${erreurs.join(", ")}` : ""}` : `aucune écoute possible : ${erreurs.join(", ")}`, ecoutes: demarrees };
+    return { ok: demarrees.length > 0, message: demarrees.length ? `à l'écoute : ${demarrees.map((d) => `${d.host}:${d.port} (${d.niveau}${d.tls ? ", HTTPS" : ""})`).join(", ")}${erreurs.length ? ` ; échec : ${erreurs.join(", ")}` : ""}` : `aucune écoute possible : ${erreurs.join(", ")}`, ecoutes: demarrees };
   }
 
   stop(): void {
@@ -152,7 +158,7 @@ export class MobileServer {
     return !!m && egal(m[1]!, sessionCookie(this.options.token));
   }
 
-  private async repondre(req: IncomingMessage, res: ServerResponse, niveau: Niveau): Promise<void> {
+  private async repondre(req: IncomingMessage, res: ServerResponse, niveau: Niveau, securise = false): Promise<void> {
     const ip = req.socket.remoteAddress ?? "?";
     const url = new URL(req.url ?? "/", "http://x");
     const chemin = url.pathname;
@@ -170,7 +176,7 @@ export class MobileServer {
         this.rate(ip);
         return this.fin(res, 401, PAGE_REFUS, "text/html; charset=utf-8");
       }
-      return this.fin(res, 302, "", "text/plain", { location: "/", "set-cookie": `jv=${sessionCookie(this.options.token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000` });
+      return this.fin(res, 302, "", "text/plain", { location: "/", "set-cookie": `jv=${sessionCookie(this.options.token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000${securise ? "; Secure" : ""}` });
     }
 
     // L'en-tête x-jeton reste possible pour les outils (tests, scripts).
@@ -182,9 +188,13 @@ export class MobileServer {
 
     if (fichier && req.method === "GET") return this.servir(res, fichier);
 
-    if (chemin === "/api/etat" && req.method === "GET") return this.json(res, 200, { ok: true, niveau, version: this.options.version ?? "" });
+    if (chemin === "/api/etat" && req.method === "GET") return this.json(res, 200, { ok: true, niveau, version: this.options.version ?? "", https: securise, notifications: !!this.options.push && niveau === "chiffre" });
+    if (chemin === "/api/push/cle" && req.method === "GET") {
+      if (niveau !== "chiffre" || !this.options.push) return this.json(res, 403, { erreur: "Les notifications demandent la connexion chiffrée (Tailscale)." });
+      return this.json(res, 200, { ok: true, cle: this.options.push.cle() });
+    }
 
-    if (req.method === "POST" && (chemin === "/api/invoke" || chemin === "/api/demander")) {
+    if (req.method === "POST" && ["/api/invoke", "/api/demander", "/api/push/abonner", "/api/push/desabonner"].includes(chemin)) {
       // Protection contre les requêtes venues d'un autre site : JSON obligatoire, origine = ce serveur.
       if (!/^application\/json/i.test(req.headers["content-type"] ?? "")) return this.json(res, 415, { erreur: "JSON attendu" });
       const origine = req.headers.origin;
@@ -202,6 +212,12 @@ export class MobileServer {
         corps = JSON.parse(await this.lire(req)) as Record<string, unknown>;
       } catch {
         return this.json(res, 400, { erreur: "JSON invalide" });
+      }
+      if (chemin === "/api/push/abonner" || chemin === "/api/push/desabonner") {
+        if (niveau !== "chiffre" || !this.options.push) return this.json(res, 403, { erreur: "Les notifications demandent la connexion chiffrée (Tailscale)." });
+        if (chemin === "/api/push/abonner") return this.options.push.abonner(corps.subscription) ? this.json(res, 200, { ok: true }) : this.json(res, 400, { erreur: "Abonnement refusé." });
+        this.options.push.desabonner(String(corps.endpoint ?? ""));
+        return this.json(res, 200, { ok: true });
       }
       if (chemin === "/api/invoke") {
         const canal = String(corps.canal ?? "");
