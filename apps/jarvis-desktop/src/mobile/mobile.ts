@@ -158,6 +158,12 @@ async function vueEtat(): Promise<void> {
     const manquants = (liste as any[]).filter((c) => c.etat === "a-configurer");
     html += `<div class="card"><h2>Ce que je sais faire</h2><b>${bilan.actives} sur ${bilan.total}</b> fonctions sont prêtes.<div class="bar"><i style="width:${Math.round((bilan.actives / bilan.total) * 100)}%"></i></div>${manquants.length ? `<p class="muted">À régler sur le PC :</p>${manquants.slice(0, 8).map((c) => `<div class="row"><div class="g"><b>${esc(c.titre)}</b><br><span class="muted">${esc(c.manque ?? "")}</span></div></div>`).join("")}` : `<p class="muted">Tout est en place.</p>`}</div>`;
   }
+  if (cap.status === "fulfilled" && cap.value.verifs && Object.keys(cap.value.verifs).length) {
+    const vs = Object.values(cap.value.verifs) as any[];
+    const n = (e: string) => vs.filter((v) => v.etat === e).length;
+    const mal = vs.filter((v) => v.etat === "echec" || v.etat === "attention");
+    html += `<div class="card"><h2>Dernier test chez toi</h2><p>✅ ${n("ok")} · 🟠 ${n("attention")} · 🔴 ${n("echec")} · ⚪ ${n("ignore")} non configurés</p>${mal.length ? mal.map((v) => `<div class="row"><div class="g"><b>${v.etat === "echec" ? "🔴" : "🟠"} ${esc(v.titre)}</b><br><span class="muted">${esc(v.detail)}</span></div></div>`).join("") : `<p class="muted">Tout ce qui est configuré marche.</p>`}<p class="muted">Pour relancer le test, utilise Réglages sur le PC.</p></div>`;
+  }
   if (cout.status === "fulfilled") {
     const c = cout.value;
     html += `<div class="card"><h2>Consommation de Claude</h2><div class="tiles"><div class="tile"><div class="v">${c.resume.aujourdhui.appels}</div>appels aujourd'hui</div><div class="tile"><div class="v">${Number(c.resume.aujourdhui.usd).toFixed(2)}<small>$</small></div>équivalent du jour</div></div>${c.plafond ? `<div class="bar"><i style="width:${Math.min(100, Math.round((c.resume.aujourdhui.usd / c.plafond) * 100))}%"></i></div><p class="muted">Plafond : ${Number(c.plafond).toFixed(2)} $</p>` : ""}</div>`;

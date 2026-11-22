@@ -102,3 +102,16 @@ describe("messages d'erreur en français", () => {
     expect(found).toBe(path.join("/res", "claude", process.platform === "win32" ? "claude.exe" : "claude"));
   });
 });
+
+describe("cerveau : erreur renvoyée comme un résultat « réussi »", () => {
+  it("traite un résultat marqué is_error comme une erreur, avec un message en français", async () => {
+    const { fn } = fakeQuery(() => [{ type: "result", subtype: "success", is_error: true, result: "Invalid API key · Please run /login" }]);
+    const reply = await brain(fn).ask("Salut");
+    expect(reply.error).toContain("Invalid API key");
+    expect(reply.text).toContain("Je ne suis pas connectée");
+  });
+  it("une vraie réponse n'est pas touchée", async () => {
+    const { fn } = fakeQuery(() => [{ type: "result", subtype: "success", is_error: false, result: "Bonjour." }]);
+    expect(await brain(fn).ask("Salut")).toEqual({ text: "Bonjour." });
+  });
+});

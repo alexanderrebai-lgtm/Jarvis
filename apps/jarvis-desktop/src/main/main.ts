@@ -64,10 +64,11 @@ import { SettingsStore } from "./settings.js";
 import { sealSecrets } from "./secret-backup.js";
 import { describeLost, Watchdog } from "./watchdog.js";
 import { connectPlusHost } from "./plus-host.js";
-import { SuiviVoiture } from "./voiture-suivi.js";
+import { SuiviVoiture, phraseVoiture } from "./voiture-suivi.js";
 import { UsageStore, jourLocal, phraseUsage } from "./usage.js";
 import { bilan, capacites, phraseCapacites } from "./capacites.js";
 import { adresseMaison, adresseTailscale } from "./reseau.js";
+import { VerifStore, lancerVerifications, phraseVerifications, type CheckDef, type Verdict, type Verif } from "./verifications.js";
 import { SatelliteServer } from "./satellite.js";
 import { avecRelecture, promptRelecteur } from "./relecture.js";
 import { MobileServer, canalAutorise, type Niveau as NiveauMobile } from "./mobile.js";
@@ -1905,7 +1906,7 @@ ipcMain.handle("ameliorations:decider", (_event, payload: { id: string; accepte:
   return { propositions: ameliorations.liste(), derniereRevue: ameliorations.derniereRevue() ?? null };
 });
 ipcMain.handle("ameliorations:lancer", async () => ({ ...(await lancerRevue()), propositions: ameliorations.liste(), derniereRevue: ameliorations.derniereRevue() ?? null }));
-ipcMain.handle("capacites:lire", () => ({ liste: capaciteListe(), bilan: bilan(capaciteListe()) }));
+ipcMain.handle("capacites:lire", () => ({ liste: capaciteListe(), bilan: bilan(capaciteListe()), verifs: verifStore.all(), testables: checks.map((c) => c.id) }));
 ipcMain.handle("cout:lire", () => ({ resume: usage.summary(30), plafond: usagePlafond() ?? null, pauseAuto: env("USAGE_PAUSE_AUTO") !== "off", mode: env("ANTHROPIC_API_KEY") ? "cle-api" : "abonnement" }));
 ipcMain.handle("memoire:ajouter", (_event, fait: string) => (fait?.trim() ? notes.remember(fait.trim()) : null));
 ipcMain.handle("memoire:modifier", (_event, payload: { id: string; fait: string }) => notes.updateMemory(payload.id, payload.fait.trim()));
@@ -2354,4 +2355,155 @@ const suivi = traccarUrl
       appareil: env("VOITURE_TRACCAR_APPAREIL"),
     })
   : undefined;
-connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings: briefingActions, sante: () => healthStore.phrase(), cout: () => phraseUsage(usage.summary(30), usagePlafond()), capacites: () => phraseCapacites(capaciteListe()), revue: async () => (await lancerRevue()).message, voiture: () => (suivi ? suivi.phrase() : Promise.resolve("Le suivi de la voiture n'est pas configuré : va dans Réglages → Voiture (traceur GPS) pour relier ton serveur Traccar.")) });
+connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings: briefingActions, sante: () => healthStore.phrase(), cout: () => phraseUsage(usage.summary(30), usagePlafond()), capacites: () => phraseCapacites(capaciteListe()), revue: async () => (await lancerRevue()).message, verifier: async () => phraseVerifications(await testerChezMoi()), voiture: () => (suivi ? suivi.phrase() : Promise.resolve("Le suivi de la voiture n'est pas configuré : va dans Réglages → Voiture (traceur GPS) pour relier ton serveur Traccar.")) });
+
+
+// ---------- Test de bout en bout (« Tester chez moi ») ----------
+
+const verifStore = new VerifStore(config.dataDir);
+const vOk = (detail: string): Verdict => ({ etat: "ok", detail });
+const vNon = (detail = "Pas configuré."): Verdict => ({ etat: "ignore", detail });
+const checks: CheckDef[] = [
+  {
+    id: "cerveau",
+    titre: "Claude (le cerveau)",
+    lancer: async () => {
+      const r = await brain.ask("Réponds uniquement par le mot OK.", {}, { trust: "restreint", outils: [], source: "test" });
+      const reponse = r.text.trim();
+      return r.error || !/\bOK\b/i.test(reponse) ? { etat: "echec", detail: reponse.slice(0, 160) || "Pas de réponse de Claude.", conseil: "Reconnecte-toi à Claude (Réglages → Cerveau) ou vérifie la connexion Internet." } : vOk(`Claude répond : « ${reponse.slice(0, 40)} ».`);
+    },
+  },
+  {
+    id: "voix",
+    titre: "Voix",
+    lancer: async () => {
+      const audio = await voice.synthesize("Test de la voix.");
+      if (!audio || audio.data.length < 500) return { etat: "echec", detail: voice.lastError ?? "Aucun son produit.", conseil: "Vérifie la connexion Internet (voix en ligne) ou la voix locale (Réglages → Voix et oreilles)." };
+      const reveil = env("ECOUTE_MODE") === "nom" || wakeEngine;
+      if (voice.mode === "secours Windows") return { etat: "attention", detail: `Voix de secours de Windows (${voice.lastError ?? "voix en ligne injoignable"}).`, conseil: "Vérifie ta connexion Internet." };
+      if (!reveil) return { etat: "attention", detail: `Voix ${voice.mode} OK, mais le détecteur « Hey Jarvis » n'est pas chargé.`, conseil: "Vérifie le micro et la connexion au premier démarrage (le modèle se télécharge)." };
+      return vOk(`Voix ${voice.mode} et « Hey Jarvis » prêts.`);
+    },
+  },
+  {
+    id: "google",
+    titre: "Mails et agenda",
+    lancer: async () => {
+      if (!agenda) return vNon("Compte Google non connecté.");
+      const now = new Date();
+      const ev = await agenda.list(now, new Date(now.getTime() + 86_400_000));
+      return vOk(`Agenda lu : ${ev.length} rendez-vous dans les 24 h.`);
+    },
+  },
+  {
+    id: "spotify",
+    titre: "Musique Spotify",
+    lancer: async () => {
+      if (!spotify.connected) return vNon("Spotify non connecté.");
+      const n = await spotify.nowPlaying();
+      return vOk(n.actif ? `Connecté, en lecture : ${n.titre ?? "titre inconnu"}.` : "Connecté (rien en lecture).");
+    },
+  },
+  {
+    id: "maison",
+    titre: "Maison connectée (Tapo)",
+    lancer: async () => {
+      if (!tapo) return vNon();
+      const s = await tapo.states();
+      if (!s.length) return { etat: "echec", detail: "Aucun appareil trouvé.", conseil: "Vérifie que le PC est sur le même réseau que tes ampoules, ou indique leurs adresses IP dans Réglages." };
+      const hors = s.filter((d) => d.allume === null || d.erreur);
+      return hors.length ? { etat: "attention", detail: `${s.length - hors.length}/${s.length} appareils répondent ; injoignables : ${hors.map((d) => d.nom).join(", ")}.`, conseil: "Vérifie qu'ils sont alimentés (interrupteur allumé)." } : vOk(`${s.length} appareil(s) répondent.`);
+    },
+  },
+  {
+    id: "cameras",
+    titre: "Caméras de surveillance",
+    lancer: async () => {
+      if (!security.enabled) return vNon();
+      const r = await settingActions.runSettingAction("cameras");
+      return { etat: r.ok ? "ok" : "echec", detail: r.message, ...(r.ok ? {} : { conseil: "Vérifie l'adresse IP, l'identifiant et le mot de passe du compte caméra (appli Tapo → compte de la caméra)." }) };
+    },
+  },
+  {
+    id: "alertes",
+    titre: "Alertes sur le téléphone (Telegram)",
+    lancer: async () => {
+      if (!phone.enabled) return vNon("Telegram non configuré.");
+      await phone.text("✅ Jarvis : test de bout en bout. Ce message est bien arrivé.");
+      return vOk("Message de test envoyé : vérifie qu'il est arrivé sur ton téléphone.");
+    },
+  },
+  {
+    id: "forme",
+    titre: "Ma forme (montre)",
+    lancer: async () => {
+      if (env("SANTE_ACTIVE") !== "true") return vNon("Réception désactivée.");
+      const s = healthStore.summary();
+      if (!s.length) return { etat: "attention", detail: "Réception prête, mais aucune donnée reçue du téléphone.", conseil: "Dans l'appli du téléphone (Health Auto Export sur iPhone, Health Connect Webhook sur Android), lance un envoi ; vérifie l'adresse, le code et le Wi-Fi." };
+      const dernier = s.map((x) => x.instant).sort().at(-1)!;
+      const ageH = (Date.now() - Date.parse(dernier)) / 3_600_000;
+      return ageH > 36 ? { etat: "attention", detail: `${s.length} types de mesures, mais la dernière date de ${Math.round(ageH)} h.`, conseil: "L'envoi automatique de l'appli du téléphone semble arrêté : relance-le." } : vOk(`${s.length} types de mesures, dernière il y a ${Math.max(0, Math.round(ageH))} h.`);
+    },
+  },
+  {
+    id: "voiture-suivi",
+    titre: "Suivi de la voiture (traceur)",
+    lancer: async () => {
+      if (!suivi) return vNon();
+      const e = await suivi.etat();
+      return e.enLigne ? vOk(phraseVoiture(e)) : { etat: "attention", detail: phraseVoiture(e), conseil: "Le traceur est hors ligne : vérifie sa carte SIM et son branchement sur la prise OBD." };
+    },
+  },
+  {
+    id: "mobile",
+    titre: "Jarvis Mobile (téléphone)",
+    lancer: async () => {
+      if (env("MOBILE_ACTIF") !== "true") return vNon("Désactivé.");
+      const e = mobileEcoutes();
+      if (!e.length) return { etat: "attention", detail: "Activé, mais aucune adresse disponible.", conseil: "Installe Tailscale sur le PC et le téléphone (même compte), ou autorise le Wi-Fi de la maison." };
+      return mobileServer ? vOk(`À l'écoute : ${e.map((x) => (x.niveau === "chiffre" ? "Tailscale (chiffré)" : "Wi-Fi (limité)")).join(", ")}.`) : { etat: "echec", detail: "Le serveur ne tourne pas.", conseil: "Redémarre Jarvis." };
+    },
+  },
+  {
+    id: "satellites",
+    titre: "Micros des autres pièces",
+    lancer: async () => (env("SATELLITE_ACTIF") !== "true" ? vNon("Désactivé.") : satelliteServer ? vOk("Serveur à l'écoute (le micro lui-même n'est pas testé d'ici).") : { etat: "echec", detail: "Le serveur ne tourne pas.", conseil: "Redémarre Jarvis (le port est peut-être pris)." }),
+  },
+  {
+    id: "ia-locale",
+    titre: "IA locale",
+    lancer: async () => {
+      if (!env("OLLAMA_URL") && !env("IA_LOCALE_MODELE")) return vNon();
+      const r = await settingActions.runSettingAction("ollama");
+      return { etat: r.ok ? "ok" : "echec", detail: r.message, ...(r.ok ? {} : { conseil: "Vérifie qu'Ollama est lancé et que le modèle est installé." }) };
+    },
+  },
+  {
+    id: "reveil",
+    titre: "Réveil",
+    lancer: async () => {
+      if (!wake) return vNon("Désactivé.");
+      const p = wake.status().prochain;
+      return p ? vOk(`Prochain réveil : ${p.date} à ${p.heure} (${p.raison}).`) : { etat: "attention", detail: "Aucun réveil programmé.", conseil: "Indique un planning ou une heure habituelle (Réglages → Réveil)." };
+    },
+  },
+  {
+    id: "meteo",
+    titre: "Météo",
+    lancer: async () => (weather.current ? vOk("Météo à jour.") : { etat: "attention", detail: "Pas encore de météo.", conseil: "Vérifie la ville (Réglages → Toi et ta ville) et la connexion Internet." }),
+  },
+];
+let verifEnCours = false;
+async function testerChezMoi(ids?: string[]): Promise<Verif[]> {
+  if (verifEnCours) throw new Error("Un test est déjà en cours : patiente une minute.");
+  verifEnCours = true;
+  try {
+    const defs = ids?.length ? checks.filter((c) => ids.includes(c.id)) : checks;
+    const res = await lancerVerifications(defs);
+    verifStore.save(res);
+    return res;
+  } finally {
+    verifEnCours = false;
+  }
+}
+ipcMain.handle("capacites:tester", async (_event, payload?: { ids?: string[] }) => ({ resultats: await testerChezMoi(payload?.ids), verifs: verifStore.all() }));

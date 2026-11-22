@@ -187,7 +187,10 @@ export class Brain {
           const u = (message as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
           jetonsEntree = u?.input_tokens;
           jetonsSortie = u?.output_tokens;
-          if (message.subtype === "success") finalText = message.result;
+          // Claude Code renvoie parfois une erreur (« Invalid API key », quota…) comme un résultat « réussi » marqué is_error :
+          // sans ce garde-fou, Jarvis la lirait comme si c'était une vraie réponse.
+          if (message.subtype === "success" && (message as { is_error?: boolean }).is_error === true) error = String(message.result ?? "erreur");
+          else if (message.subtype === "success") finalText = message.result;
           else error = message.subtype;
         }
       }

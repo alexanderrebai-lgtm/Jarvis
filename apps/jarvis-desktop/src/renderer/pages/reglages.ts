@@ -165,29 +165,60 @@ export function renderSettings(root: HTMLElement): void {
 // ---------- Ce que Jarvis sait faire ----------
 
 interface Capacite { id: string; titre: string; quoi: string; exemple: string; etat: "active" | "a-configurer" | "desactivee" | "materiel" | "toujours"; manque?: string; groupe?: string }
+interface Verif { id: string; titre: string; etat: "ok" | "attention" | "echec" | "ignore"; detail: string; conseil?: string; ms: number; le: string }
+interface CapData { liste: Capacite[]; bilan: { total: number; actives: number; aConfigurer: number }; verifs: Record<string, Verif>; testables: string[] }
 
 const ETAT_CAPACITE: Record<Capacite["etat"], string> = { active: "✅ Actif", toujours: "✅ Toujours prêt", "a-configurer": "🟡 À configurer", desactivee: "⚪ Désactivé", materiel: "🔌 Matériel à ajouter" };
+const ETAT_VERIF: Record<Verif["etat"], string> = { ok: "✅", attention: "🟠", echec: "🔴", ignore: "⚪" };
+const quand = (iso: string) => new Date(iso).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
-/** Tableau des capacités : ce que Jarvis sait faire, ce qui est prêt chez toi, et comment activer le reste. */
+/** Tableau des capacités : ce que Jarvis sait faire, ce qui est prêt chez toi, et le test réel de chaque fonction. */
 async function renderCapacites(focus: (groupe: string) => void): Promise<HTMLElement> {
   const card = el("section", "panel setting-group");
   card.id = "groupe-capacites";
   card.innerHTML = `<h4><span class="ic">${ICONS.pulse}</span>Ce que Jarvis sait faire</h4>`;
   const body = el("div", "body");
   card.append(body);
-  const r = await api.invoke<{ liste: Capacite[]; bilan: { total: number; actives: number; aConfigurer: number } }>("capacites:lire");
+  let r = await api.invoke<CapData>("capacites:lire");
   let toutVoir = false;
+  let enCours: string | undefined;
   const draw = () => {
+    const verifs = Object.values(r.verifs ?? {});
+    const compte = { ok: 0, attention: 0, echec: 0, ignore: 0 };
+    for (const v of verifs) compte[v.etat] += 1;
+    const dernier = verifs.map((v) => v.le).sort().at(-1);
     const shown = r.liste.filter((c) => toutVoir || !(c.etat === "active" || c.etat === "toujours"));
+    const alerte = verifs.filter((v) => v.etat === "echec" || v.etat === "attention");
     body.innerHTML = `<p class="lead"><b>${r.bilan.actives} sur ${r.bilan.total}</b> fonctions sont prêtes chez toi${r.bilan.aConfigurer ? `, ${r.bilan.aConfigurer} demandent un réglage` : ""}.</p>
       <div class="cout-jauge"><i style="width:${Math.round((r.bilan.actives / r.bilan.total) * 100)}%"></i></div>
-      <div class="cap-grid">${shown.map((c) => `<div class="cap ${c.etat}"><div class="cap-t"><b>${esc(c.titre)}</b><span>${ETAT_CAPACITE[c.etat]}</span></div><p>${esc(c.quoi)}</p><small>Essaie : ${esc(c.exemple)}</small>${c.manque ? `<small class="manque">${esc(c.manque)}</small>` : ""}${c.groupe ? `<button class="small" data-go="${esc(c.groupe)}">${c.etat === "active" ? "Réglages" : "Configurer"}</button>` : ""}</div>`).join("") || '<p class="empty">Tout est prêt.</p>'}</div>
+      <div class="buttons"><button class="primary" data-test-all ${enCours ? "disabled" : ""}>${enCours === "tout" ? "Test en cours (jusqu'à une minute)…" : "Tester chez moi"}</button></div>
+      <p class="tip">Le test vérifie pour de vrai chaque fonction : Claude, voix, Google, Spotify, maison, caméras, Telegram, montre, voiture, téléphone… Il envoie un court message de test sur Telegram si c'est configuré.</p>
+      ${verifs.length ? `<p class="lead">Dernier test (${esc(quand(dernier!))}) : ✅ ${compte.ok} · 🟠 ${compte.attention} · 🔴 ${compte.echec} · ⚪ ${compte.ignore} non configurés</p>${alerte.length ? alerte.map((v) => `<div class="cap ${v.etat === "echec" ? "a-configurer" : ""}" style="margin:6px 0"><div class="cap-t"><b>${ETAT_VERIF[v.etat]} ${esc(v.titre)}</b></div><p>${esc(v.detail)}</p>${v.conseil ? `<small class="manque">${esc(v.conseil)}</small>` : ""}</div>`).join("") : '<p class="lead">Tout ce qui est configuré marche. ✅</p>'}` : ""}
+      <div class="cap-grid">${shown.map((c) => {
+        const v = r.verifs?.[c.id];
+        const testable = r.testables?.includes(c.id);
+        return `<div class="cap ${c.etat}"><div class="cap-t"><b>${esc(c.titre)}</b><span>${ETAT_CAPACITE[c.etat]}</span></div><p>${esc(c.quoi)}</p><small>Essaie : ${esc(c.exemple)}</small>${c.manque ? `<small class="manque">${esc(c.manque)}</small>` : ""}${v && v.etat !== "ignore" ? `<small>${ETAT_VERIF[v.etat]} ${esc(v.detail)} <em>(${esc(quand(v.le))})</em></small>` : ""}<div class="buttons">${c.groupe ? `<button class="small" data-go="${esc(c.groupe)}">${c.etat === "active" ? "Réglages" : "Configurer"}</button>` : ""}${testable ? `<button class="small" data-test="${esc(c.id)}" ${enCours ? "disabled" : ""}>${enCours === c.id ? "Test…" : "Tester"}</button>` : ""}</div></div>`;
+      }).join("") || '<p class="empty">Tout est prêt.</p>'}</div>
       <div class="buttons"><button class="small" data-toggle-all>${toutVoir ? "Seulement ce qui reste à faire" : `Voir tout (${r.liste.length})`}</button></div>`;
     body.querySelectorAll<HTMLButtonElement>("[data-go]").forEach((b) => (b.onclick = () => focus(b.dataset.go!)));
     body.querySelector<HTMLButtonElement>("[data-toggle-all]")!.onclick = () => {
       toutVoir = !toutVoir;
       draw();
     };
+    const lancer = async (ids: string[] | undefined, marque: string) => {
+      enCours = marque;
+      draw();
+      try {
+        const res = await api.invoke<{ verifs: Record<string, Verif> }>("capacites:tester", ids ? { ids } : undefined);
+        r = { ...r, verifs: res.verifs };
+      } catch (e) {
+        window.alert(e instanceof Error ? e.message : String(e));
+      }
+      enCours = undefined;
+      draw();
+    };
+    body.querySelector<HTMLButtonElement>("[data-test-all]")!.onclick = () => void lancer(undefined, "tout");
+    body.querySelectorAll<HTMLButtonElement>("[data-test]").forEach((b) => (b.onclick = () => void lancer([b.dataset.test!], b.dataset.test!)));
   };
   draw();
   return card;
