@@ -90,6 +90,20 @@ export class NotesRepository {
     return entry;
   }
 
+  /** Corrige un fait mémorisé (page Mémoire). */
+  updateMemory(id: string, fait: string): boolean {
+    if (!fait) return false;
+    let found = false;
+    this.memoire.update((all) =>
+      all.map((entry) => {
+        if (entry.id !== id) return entry;
+        found = true;
+        return { ...entry, fait };
+      }),
+    );
+    return found;
+  }
+
   forget(id: string): boolean {
     const before = this.memoire.read().length;
     return this.memoire.update((all) => all.filter((entry) => entry.id !== id)).length < before;

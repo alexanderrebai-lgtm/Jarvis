@@ -480,3 +480,21 @@ body.mode-jeu *, body.mode-jeu *::before, body.mode-jeu *::after { animation-pla
 .health-pane .health-button + .health-button { margin-left: 6px; }
 .hidden { display: none !important; }
 .health-pane .health-actions .health-button { margin: 0; }
+
+/* ---------- Connecteurs MCP ---------- */
+.connectors { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 14px; }
+.connector { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.connector.off { opacity: 0.55; }
+.connector small { color: var(--muted); overflow-wrap: anywhere; }
+.connector .grow { flex: 1; min-width: 0; }
+.connector-form textarea { width: 100%; background: rgba(0, 0, 0, 0.3); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 13px "Mono", monospace; resize: vertical; }
+.connector-form .presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+
+/* ---------- Mémoire ---------- */
+.memory-search { background: rgba(0, 0, 0, 0.3); border: 1px solid var(--line); border-radius: 999px; color: var(--text); padding: 6px 14px; font: 12px "Inter"; width: 200px; }
+.memory-new { width: 100%; background: rgba(0, 0, 0, 0.3); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 13px "Inter"; resize: vertical; }
+.memory-fact, .memory-note { padding: 10px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.memory-fact p, .memory-note p { margin: 0 0 6px; font-size: 14px; line-height: 1.5; }
+.memory-fact p[contenteditable]:focus { outline: 1px solid var(--hud); border-radius: 6px; padding: 2px 6px; }
+.memory-meta { display: flex; align-items: center; gap: 8px; }
+.memory-meta small { flex: 1; color: var(--muted); font-size: 11px; }

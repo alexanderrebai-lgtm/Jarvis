@@ -66,6 +66,7 @@ import { connectPlusHost } from "./plus-host.js";
 import { createRoutineRunner } from "./routine-runner.js";
 import { createIntentActions } from "./intent-actions.js";
 import { Updates } from "./updates.js";
+import { ConnectorStore, CONNECTOR_PRESETS, testConnector, type ConnectorInput } from "./connectors.js";
 import { WakeWordEngine } from "./wake-word.js";
 import { MusicPanel } from "./music-panel.js";
 import { createPcCare } from "./pc-care.js";
@@ -593,14 +594,18 @@ const procedures = new Procedures(workspace, async () => {
 // ---------- Cerveau, voix, oreilles ----------
 
 const plusHostRef: { current?: PlusHost } = {};
+const builtinMcp = {
+  jarvis: jarvisMcpServer(host, tools, screens, journal, race),
+  jarvis_plus: plusMcpServer(new Proxy({} as PlusHost, { get: (_t, key) => (plusHostRef.current as unknown as Record<string | symbol, unknown>)[key] })),
+};
+const connectors = new ConnectorStore(config.dataDir, vault);
+
 const brain = new Brain({
   dataDir: config.dataDir,
   workspace,
   systemPrompt: () => personaPrompt({ ownerName, workspace, os: "Windows", memories: notes.memories(), workFolder }),
-  mcpServers: {
-    jarvis: jarvisMcpServer(host, tools, screens, journal, race),
-    jarvis_plus: plusMcpServer(new Proxy({} as PlusHost, { get: (_t, key) => (plusHostRef.current as unknown as Record<string | symbol, unknown>)[key] })),
-  },
+  // Outils de Jarvis + connecteurs MCP ajoutés dans les Réglages (relus à chaque conversation).
+  mcpServers: () => ({ ...connectors.active(), ...builtinMcp }),
   model: env("CLAUDE_MODEL"),
   workFolder: pseudonyms ? workFolder : undefined,
   onDecision: (tool, input, allowed, reason, trust) => actions.add({ outil: tool, resume: summarizeInput(tool, input), autorise: allowed, ...(reason ? { raison: reason } : {}), ...(trust ? { origine: trust } : {}) }),
@@ -1473,6 +1478,44 @@ ipcMain.handle("diagnostic:run", async () => {
 });
 
 ipcMain.handle("jeu:etat", () => flags.jeu);
+
+// ---------- Connecteurs MCP (page Réglages) ----------
+
+const connectorResult = (fn: () => unknown) => {
+  try {
+    fn();
+    return { ok: true, connecteurs: connectors.list() };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error), connecteurs: connectors.list() };
+  }
+};
+ipcMain.handle("connecteurs:lister", () => ({ connecteurs: connectors.list(), modeles: CONNECTOR_PRESETS }));
+ipcMain.handle("connecteurs:enregistrer", (_event, input: ConnectorInput) =>
+  connectorResult(() => {
+    const c = connectors.save(input);
+    actions.add({ outil: "connecteur MCP", resume: `Ajouté ou modifié : ${c.nom} (${c.type === "web" ? c.url : c.commande})`, autorise: true });
+  }),
+);
+ipcMain.handle("connecteurs:basculer", (_event, payload: { nom: string; actif: boolean }) => connectorResult(() => connectors.setActive(payload.nom, payload.actif)));
+ipcMain.handle("connecteurs:supprimer", (_event, nom: string) =>
+  connectorResult(() => {
+    connectors.remove(nom);
+    actions.add({ outil: "connecteur MCP", resume: `Supprimé : ${nom}`, autorise: true });
+  }),
+);
+ipcMain.handle("connecteurs:tester", async (_event, nom: string) => {
+  const c = connectors.list().find((x) => x.nom === nom);
+  if (!c) return { ok: false, message: "Connecteur introuvable.", outils: [] };
+  return testConnector(connectors.config(c));
+});
+
+// ---------- Mémoire (page Mémoire) ----------
+
+ipcMain.handle("memoire:lire", () => ({ faits: [...notes.memories()].reverse(), notes: notes.list(100) }));
+ipcMain.handle("memoire:ajouter", (_event, fait: string) => (fait?.trim() ? notes.remember(fait.trim()) : null));
+ipcMain.handle("memoire:modifier", (_event, payload: { id: string; fait: string }) => notes.updateMemory(payload.id, payload.fait.trim()));
+ipcMain.handle("memoire:oublier", (_event, id: string) => notes.forget(id));
+ipcMain.handle("memoire:note-supprimer", (_event, id: string) => notes.remove(id));
 ipcMain.handle("journal:lire", (_event, date?: string) => {
   const jours = actions.days().slice(0, 60);
   const jour = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : (jours[0] ?? new Date().toISOString().slice(0, 10));

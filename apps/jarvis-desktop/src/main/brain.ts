@@ -52,7 +52,8 @@ export interface BrainOptions {
   workspace: string;
   /** Recalculée au début de chaque nouvelle conversation (pour y mettre la mémoire à jour). */
   systemPrompt: string | (() => string);
-  mcpServers: Options["mcpServers"];
+  /** Outils MCP ; une fonction est relue à chaque conversation (connecteurs ajoutés par Alex). */
+  mcpServers: Options["mcpServers"] | (() => Options["mcpServers"]);
   model?: string | undefined;
   queryFn?: QueryFn;
   /** Dossier des documents de travail (lus seulement avec pseudonymes). */
@@ -122,7 +123,7 @@ export class Brain {
         preset: "claude_code",
         append: typeof this.options.systemPrompt === "function" ? this.options.systemPrompt() : this.options.systemPrompt,
       },
-      mcpServers: this.options.mcpServers,
+      mcpServers: typeof this.options.mcpServers === "function" ? this.options.mcpServers() : this.options.mcpServers,
       settingSources: [],
       permissionMode: "default",
       canUseTool: async (toolName, input) => {

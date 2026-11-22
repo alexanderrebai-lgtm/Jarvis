@@ -3,7 +3,7 @@
  * demande, chacune sur l'écran qui lui est attribué.
  */
 
-export type PageId = "accueil" | "ingenieur" | "travail" | "code" | "rd" | "securite" | "performances" | "diagnostic" | "reglages" | "journal" | "sante";
+export type PageId = "accueil" | "ingenieur" | "travail" | "code" | "rd" | "securite" | "performances" | "diagnostic" | "reglages" | "journal" | "sante" | "memoire";
 
 export interface PageInfo {
   id: PageId;
@@ -28,6 +28,7 @@ export const PAGES: PageInfo[] = [
   { id: "performances", annonce: "Voilà l'état du PC.", titre: "Performances du PC", mots: ["performance", "performances", "pc", "ordinateur", "processeur", "carte graphique", "temperatures", "systeme", "ressources"], ecranParDefaut: "gauche" },
   { id: "diagnostic", annonce: "Voilà mon bilan de santé.", titre: "Diagnostic", mots: ["diagnostic", "etat de jarvis", "verification", "bilan"], ecranParDefaut: "droite" },
   { id: "sante", annonce: "Je fais le bilan de santé du PC.", titre: "Santé du PC", mots: ["sante du pc", "sante de l'ordinateur", "sante", "diagnostic du pc", "diagnostic de l'ordinateur", "bilan du pc", "rapport du pc", "optimise le pc", "optimisation"], ecranParDefaut: "droite" },
+  { id: "memoire", annonce: "Voilà ce que je sais de toi.", titre: "Mémoire", mots: ["memoire", "ma memoire", "ce que tu sais de moi", "ce que tu sais", "souvenirs", "tes souvenirs"], ecranParDefaut: "droite" },
   { id: "journal", annonce: "Voilà mon journal.", titre: "Journal", mots: ["journal", "historique", "ce que tu as fait", "activite", "evenements"], ecranParDefaut: "droite" },
   { id: "reglages", annonce: "Voilà les réglages.", titre: "Réglages", mots: ["reglages", "parametres", "configuration", "options"], ecranParDefaut: "droite" },
 ];

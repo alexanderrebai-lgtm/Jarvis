@@ -5,6 +5,7 @@ import { renderDiagnostic } from "./pages/diagnostic.js";
 import { renderSettings } from "./pages/reglages.js";
 import { renderJournal } from "./pages/journal.js";
 import { renderHealth } from "./pages/sante.js";
+import { renderMemory } from "./pages/memoire.js";
 import { renderEngineer } from "./pages/ingenieur.js";
 import { renderPerformance } from "./pages/performances.js";
 import { renderProject } from "./pages/projet.js";
@@ -50,6 +51,9 @@ switch (page) {
     break;
   case "sante":
     renderHealth(root);
+    break;
+  case "memoire":
+    renderMemory(root);
     break;
   default:
     renderHome(root);

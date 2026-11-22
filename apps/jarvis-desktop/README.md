@@ -304,6 +304,11 @@ Au démarrage, Jarvis lit le matériel (page Diagnostic → Profil matériel) et
 
 Par défaut, un petit détecteur (modèles openWakeWord : code Apache 2.0, modèles pré-entraînés CC BY-NC-SA 4.0, usage personnel) écoute seulement « Hey Jarvis », par blocs de 80 ms : environ 25 ms de calcul par seconde de son, sur un seul cœur. Tant qu'il n'a pas entendu le mot, **rien n'est transcrit** : la reconnaissance vocale (Whisper) dort, et une phrase de la télé ou d'une conversation ne réveille plus Jarvis. « Hey Jarvis » coupe aussi Jarvis s'il est en train de parler. Réglages → Voix et oreilles : « Comment réveiller Jarvis » (ou revenir à « son nom dans la phrase ») et sensibilité.
 
+## Connecteurs MCP et page Mémoire
+
+- **Connecteurs (Réglages → Connecteurs MCP)** : des outils en plus pour Claude au format standard MCP (Home Assistant, GitHub, Notion, un dossier du PC…), soit un programme lancé sur le PC, soit une adresse web. Exemples préremplis ; bouton « Tester » qui se connecte et liste les outils ; jetons au coffre-fort (refusés si le coffre-fort n'est pas disponible) ; relus à chaque conversation, sans redémarrer. Une voix inconnue ne peut pas s'en servir et chaque utilisation est notée dans le Journal.
+- **Page Mémoire** (« Jarvis, ouvre ta mémoire ») : tout ce que Jarvis a retenu de toi, à chercher, corriger (cliquer sur le texte) ou oublier ; ajout manuel d'un souvenir ; notes et rappels.
+
 ## Mot d'éveil, mode absent et journal
 
 - **Son nom** : Jarvis n'agit que si une phrase contient « Jarvis » (ou juste après une réponse). Ce qui ne lui est pas adressé n'est ni affiché ni gardé. Réglages → Voix et oreilles : autres noms, durée d'écoute de la suite (0 = toujours dire son nom), petit son quand il t'entend.

@@ -66,6 +66,9 @@ importers:
       '@huggingface/transformers':
         specifier: 4.3.2
         version: 4.3.2(@types/node@22.19.1)
+      '@modelcontextprotocol/sdk':
+        specifier: 1.32.2
+        version: 1.32.2(zod@3.25.76)
       electron-updater:
         specifier: 6.8.11
         version: 6.8.11

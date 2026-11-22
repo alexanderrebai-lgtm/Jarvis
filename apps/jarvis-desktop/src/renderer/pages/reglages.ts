@@ -146,7 +146,8 @@ export function renderSettings(root: HTMLElement): void {
   const load = async () => {
     view = await api.invoke<View>("reglages:lire");
     menu.innerHTML = view.groupes.map((g) => `<a href="#groupe-${g.id}" data-g="${g.id}">${GROUP_ICONS[g.id] ?? ""}<span>${esc(g.titre)}</span></a>`).join("") + (view.coffre ? "" : '<p class="warn">Chiffrement indisponible : les mots de passe restent dans jarvis.env.</p>');
-    content.replaceChildren(...view.groupes.map(renderGroup));
+    content.replaceChildren(...view.groupes.map(renderGroup), renderConnectors());
+    menu.insertAdjacentHTML("beforeend", `<a href="#groupe-connecteurs" data-g="connecteurs">${ICONS.list}<span>Connecteurs (MCP)</span></a>`);
     if (needsRestart) markRestart();
   };
   const focusGroup = (id: string) => {
@@ -157,4 +158,96 @@ export function renderSettings(root: HTMLElement): void {
   };
   api.on("reglages:groupe", (id: string) => void (view ? focusGroup(id) : load().then(() => focusGroup(id))));
   void load();
+}
+
+// ---------- Connecteurs MCP ----------
+
+interface Connector { nom: string; type: "commande" | "web"; commande?: string; arguments?: string[]; url?: string; actif: boolean; secrets: string[] }
+interface Preset { nom: string; libelle: string; type: "commande" | "web"; commande?: string; url?: string; secrets?: string; aide: string }
+
+/** Connecteurs MCP : des outils en plus pour Claude (Home Assistant, GitHub, un dossier…), branchés sans nouvelle version de Jarvis. */
+function renderConnectors(): HTMLElement {
+  const card = el("section", "panel setting-group");
+  card.id = "groupe-connecteurs";
+  card.innerHTML = `<h4><span class="ic">${ICONS.list}</span>Connecteurs (MCP)</h4>`;
+  const body = el("div", "body");
+  body.innerHTML = `<p class="lead">Des outils en plus pour Claude, au format standard MCP : Home Assistant, GitHub, Notion, un dossier du PC… Chaque connecteur est un programme lancé sur le PC ou une adresse web. Les jetons vont au coffre-fort. Une voix inconnue ne peut pas s'en servir, et chaque utilisation est notée dans le Journal.</p>`;
+  const list = el("div", "connectors");
+  const status = el("div", "status");
+  const form = el("div", "connector-form");
+  form.innerHTML = `
+    <div class="presets"></div>
+    <label class="field"><span class="name">Nom</span><div class="line"><input data-f="nom" placeholder="ex. home-assistant"></div></label>
+    <label class="field"><span class="name">Type</span><div class="line"><select data-f="type"><option value="web">Adresse web (serveur MCP en ligne ou sur le réseau)</option><option value="commande">Programme lancé sur le PC</option></select></div></label>
+    <label class="field" data-show="web"><span class="name">Adresse</span><div class="line"><input data-f="url" placeholder="https://…"></div></label>
+    <label class="field hidden" data-show="commande"><span class="name">Commande</span><div class="line"><input data-f="commande" placeholder="npx -y @modelcontextprotocol/server-filesystem C:\\Dossier"></div></label>
+    <label class="field"><span class="name">Secrets (une ligne « NOM=valeur » ; vide = garder les anciens)</span><div class="line"><textarea data-f="secrets" rows="2" placeholder="Authorization=Bearer …"></textarea></div><small data-aide></small></label>
+    <div class="buttons"><button class="primary" data-save>Ajouter / mettre à jour</button></div>`;
+  body.append(list, form, status);
+  card.append(body);
+
+  const field = (name: string) => form.querySelector<HTMLInputElement & HTMLSelectElement & HTMLTextAreaElement>(`[data-f="${name}"]`)!;
+  const showType = () => form.querySelectorAll<HTMLElement>("[data-show]").forEach((n) => n.classList.toggle("hidden", n.dataset.show !== field("type").value));
+  field("type").onchange = showType;
+  const say = (text: string, ok = true) => {
+    status.className = `status ${ok ? "ok" : "bad"}`;
+    status.textContent = text;
+  };
+
+  const draw = (connectors: Connector[]) => {
+    list.innerHTML = connectors.length
+      ? connectors
+          .map(
+            (c) => `<div class="connector ${c.actif ? "" : "off"}"><div class="grow"><b>${esc(c.nom)}</b> <small>${c.type === "web" ? esc(c.url ?? "") : esc([c.commande, ...(c.arguments ?? [])].join(" "))}</small>${c.secrets.length ? `<br><small>Secrets : ${c.secrets.map(esc).join(", ")} (dans le coffre-fort)</small>` : ""}</div>
+            <button class="small" data-test="${esc(c.nom)}">Tester</button>
+            <button class="small" data-toggle="${esc(c.nom)}" data-on="${!c.actif}">${c.actif ? "Désactiver" : "Activer"}</button>
+            <button class="small ghost" data-del="${esc(c.nom)}">Supprimer</button></div>`,
+          )
+          .join("")
+      : '<p class="empty">Aucun connecteur pour l\'instant.</p>';
+    list.querySelectorAll<HTMLButtonElement>("[data-test]").forEach((b) => {
+      b.onclick = async () => {
+        b.disabled = true;
+        say("Connexion en cours…");
+        const r = await api.invoke<{ ok: boolean; message: string; outils: string[] }>("connecteurs:tester", b.dataset.test);
+        say(`${r.message}${r.outils.length ? ` (${r.outils.slice(0, 12).join(", ")}${r.outils.length > 12 ? "…" : ""})` : ""}`, r.ok);
+        b.disabled = false;
+      };
+    });
+    list.querySelectorAll<HTMLButtonElement>("[data-toggle]").forEach((b) => (b.onclick = async () => draw((await api.invoke<{ connecteurs: Connector[] }>("connecteurs:basculer", { nom: b.dataset.toggle, actif: b.dataset.on === "true" })).connecteurs)));
+    list.querySelectorAll<HTMLButtonElement>("[data-del]").forEach((b) => {
+      b.onclick = async () => {
+        if (!window.confirm(`Supprimer le connecteur ${b.dataset.del} (et ses secrets) ?`)) return;
+        draw((await api.invoke<{ connecteurs: Connector[] }>("connecteurs:supprimer", b.dataset.del)).connecteurs);
+      };
+    });
+  };
+
+  form.querySelector<HTMLButtonElement>("[data-save]")!.onclick = async () => {
+    const r = await api.invoke<{ ok: boolean; message?: string; connecteurs: Connector[] }>("connecteurs:enregistrer", { nom: field("nom").value, type: field("type").value, url: field("url").value, commande: field("commande").value, secrets: field("secrets").value });
+    if (r.ok) {
+      field("secrets").value = "";
+      say("Enregistré. Il servira dès la prochaine conversation avec Claude. Clique sur « Tester » pour vérifier.");
+    } else say(r.message ?? "Erreur.", false);
+    draw(r.connecteurs);
+  };
+
+  void api.invoke<{ connecteurs: Connector[]; modeles: Preset[] }>("connecteurs:lister").then((r) => {
+    draw(r.connecteurs);
+    const presets = form.querySelector<HTMLElement>(".presets")!;
+    presets.innerHTML = `<small>Exemples : </small>${r.modeles.map((m, i) => `<button class="small ghost" data-preset="${i}">${esc(m.libelle)}</button>`).join(" ")}`;
+    presets.querySelectorAll<HTMLButtonElement>("[data-preset]").forEach((b) => {
+      b.onclick = () => {
+        const m = r.modeles[Number(b.dataset.preset)]!;
+        field("nom").value = m.nom;
+        field("type").value = m.type;
+        field("url").value = m.url ?? "";
+        field("commande").value = m.commande ?? "";
+        field("secrets").value = m.secrets ?? "";
+        form.querySelector<HTMLElement>("[data-aide]")!.textContent = m.aide;
+        showType();
+      };
+    });
+  });
+  return card;
 }
