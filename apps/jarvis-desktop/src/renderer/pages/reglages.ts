@@ -146,7 +146,9 @@ export function renderSettings(root: HTMLElement): void {
   const load = async () => {
     view = await api.invoke<View>("reglages:lire");
     menu.innerHTML = view.groupes.map((g) => `<a href="#groupe-${g.id}" data-g="${g.id}">${GROUP_ICONS[g.id] ?? ""}<span>${esc(g.titre)}</span></a>`).join("") + (view.coffre ? "" : '<p class="warn">Chiffrement indisponible : les mots de passe restent dans jarvis.env.</p>');
-    content.replaceChildren(...view.groupes.map(renderGroup), renderBriefings(), renderConnectors());
+    const capacitesCard = await renderCapacites(focusGroup);
+    content.replaceChildren(capacitesCard, ...view.groupes.map(renderGroup), renderBriefings(), renderConnectors());
+    menu.insertAdjacentHTML("afterbegin", `<a href="#groupe-capacites" data-g="capacites">${ICONS.pulse}<span>Ce que je sais faire</span></a>`);
     menu.insertAdjacentHTML("beforeend", `<a href="#groupe-briefings" data-g="briefings">${ICONS.alarm}<span>Briefings programmés</span></a><a href="#groupe-connecteurs" data-g="connecteurs">${ICONS.list}<span>Connecteurs (MCP)</span></a>`);
     if (needsRestart) markRestart();
   };
@@ -158,6 +160,37 @@ export function renderSettings(root: HTMLElement): void {
   };
   api.on("reglages:groupe", (id: string) => void (view ? focusGroup(id) : load().then(() => focusGroup(id))));
   void load();
+}
+
+// ---------- Ce que Jarvis sait faire ----------
+
+interface Capacite { id: string; titre: string; quoi: string; exemple: string; etat: "active" | "a-configurer" | "desactivee" | "materiel" | "toujours"; manque?: string; groupe?: string }
+
+const ETAT_CAPACITE: Record<Capacite["etat"], string> = { active: "✅ Actif", toujours: "✅ Toujours prêt", "a-configurer": "🟡 À configurer", desactivee: "⚪ Désactivé", materiel: "🔌 Matériel à ajouter" };
+
+/** Tableau des capacités : ce que Jarvis sait faire, ce qui est prêt chez toi, et comment activer le reste. */
+async function renderCapacites(focus: (groupe: string) => void): Promise<HTMLElement> {
+  const card = el("section", "panel setting-group");
+  card.id = "groupe-capacites";
+  card.innerHTML = `<h4><span class="ic">${ICONS.pulse}</span>Ce que Jarvis sait faire</h4>`;
+  const body = el("div", "body");
+  card.append(body);
+  const r = await api.invoke<{ liste: Capacite[]; bilan: { total: number; actives: number; aConfigurer: number } }>("capacites:lire");
+  let toutVoir = false;
+  const draw = () => {
+    const shown = r.liste.filter((c) => toutVoir || !(c.etat === "active" || c.etat === "toujours"));
+    body.innerHTML = `<p class="lead"><b>${r.bilan.actives} sur ${r.bilan.total}</b> fonctions sont prêtes chez toi${r.bilan.aConfigurer ? `, ${r.bilan.aConfigurer} demandent un réglage` : ""}.</p>
+      <div class="cout-jauge"><i style="width:${Math.round((r.bilan.actives / r.bilan.total) * 100)}%"></i></div>
+      <div class="cap-grid">${shown.map((c) => `<div class="cap ${c.etat}"><div class="cap-t"><b>${esc(c.titre)}</b><span>${ETAT_CAPACITE[c.etat]}</span></div><p>${esc(c.quoi)}</p><small>Essaie : ${esc(c.exemple)}</small>${c.manque ? `<small class="manque">${esc(c.manque)}</small>` : ""}${c.groupe ? `<button class="small" data-go="${esc(c.groupe)}">${c.etat === "active" ? "Réglages" : "Configurer"}</button>` : ""}</div>`).join("") || '<p class="empty">Tout est prêt.</p>'}</div>
+      <div class="buttons"><button class="small" data-toggle-all>${toutVoir ? "Seulement ce qui reste à faire" : `Voir tout (${r.liste.length})`}</button></div>`;
+    body.querySelectorAll<HTMLButtonElement>("[data-go]").forEach((b) => (b.onclick = () => focus(b.dataset.go!)));
+    body.querySelector<HTMLButtonElement>("[data-toggle-all]")!.onclick = () => {
+      toutVoir = !toutVoir;
+      draw();
+    };
+  };
+  draw();
+  return card;
 }
 
 // ---------- Connecteurs MCP ----------

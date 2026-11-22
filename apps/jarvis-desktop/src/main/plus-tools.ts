@@ -94,6 +94,7 @@ export interface PlusHost {
   };
   sante: () => string;
   cout: () => string;
+  capacites: () => string;
   voiture: () => Promise<string>;
   showImage: (titre: string, file: string, page?: PageId) => Promise<void>;
 }
@@ -367,6 +368,7 @@ export function plusTools(h: PlusHost) {
       safe(async ({ sujet, heure, jours, canaux }) => text(h.briefings.programmer({ sujet, heure, ...(jours ? { jours } : {}), ...(canaux ? { canaux } : {}) }))),
     ),
     sdkTool("sante_resume", "Dernieres donnees de sante d\u2019Alex (pas, rythme cardiaque, sommeil) recues de sa montre connectee.", {}, safe(async () => text(h.sante())), RO),
+    sdkTool("capacites_etat", "Ce que Jarvis sait faire, ce qui est actif chez Alex et ce qu\u2019il manque pour le reste (à utiliser pour « qu\u2019est-ce que tu sais faire ? », « qu\u2019est-ce que je peux configurer ? »).", {}, safe(async () => text(h.capacites())), RO),
     sdkTool("cout_claude", "Consommation de Claude par Jarvis : appels et coût du jour et du mois, ce qui consomme le plus (surveillance d\u2019écran, briefings, mails…), plafond du jour.", {}, safe(async () => text(h.cout())), RO),
     sdkTool("voiture_suivi", "Où est la voiture d\u2019Alex et son état, via son traceur GPS OBD (serveur Traccar) : position/adresse, si elle roule ou est à l\u2019arrêt, tension de la batterie, kilométrage. Pour une voiture ancienne sans services connectés (ex. Peugeot 107).", {}, safe(async () => text(await h.voiture())), RO),
     sdkTool("briefing_lister", "Liste les briefings programmés.", {}, safe(async () => text(h.briefings.lister())), RO),

@@ -522,3 +522,15 @@ body.mode-jeu *, body.mode-jeu *::before, body.mode-jeu *::after { animation-pla
 .cout-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .cout-table th, .cout-table td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
 .cout-table th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+
+/* ---------- Ce que Jarvis sait faire ---------- */
+.cap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin: 12px 0 6px; }
+.cap { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.cap.a-configurer { border-color: #f5c451; }
+.cap.materiel { border-style: dashed; }
+.cap .cap-t { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.cap .cap-t span { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.cap p { margin: 0; font-size: 13px; }
+.cap small { color: var(--muted); }
+.cap small.manque { color: #f5c451; }
+.cap button { align-self: flex-start; margin-top: auto; }

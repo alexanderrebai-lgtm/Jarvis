@@ -66,6 +66,7 @@ import { describeLost, Watchdog } from "./watchdog.js";
 import { connectPlusHost } from "./plus-host.js";
 import { SuiviVoiture } from "./voiture-suivi.js";
 import { UsageStore, jourLocal, phraseUsage } from "./usage.js";
+import { bilan, capacites, phraseCapacites } from "./capacites.js";
 import { createRoutineRunner } from "./routine-runner.js";
 import { createIntentActions } from "./intent-actions.js";
 import { Updates } from "./updates.js";
@@ -746,6 +747,17 @@ const briefingActions = {
   lister: () => briefingStore.list().map((b) => `${b.id} — ${describeBriefing(b)}${b.actif ? "" : " (en pause)"}`),
   supprimer: (id: string) => briefingStore.remove(id),
 };
+
+/** Première fois seulement, et seulement sur une installation presque vide : Jarvis dit ce qu'il sait faire et où le configurer. */
+function welcomeOnce(): void {
+  const seen = new JsonStore<{ vu?: boolean }>(config.dataDir, "bienvenue", () => ({}));
+  if (seen.read().vu) return;
+  seen.update(() => ({ vu: true }));
+  const b = bilan(capaciteListe());
+  if (b.actives > 8) return; // installation déjà bien avancée : pas de discours
+  host.notify("Bienvenue", "Ouvre Réglages : en haut, « Ce que Jarvis sait faire » liste ce qui est prêt et ce qu'il reste à brancher.");
+  if (!flags.doNotDisturb && !flags.jeu) say(`${ownerName}, je sais faire ${b.total} choses et ${b.actives} sont prêtes. Ouvre les réglages : en haut, je te montre ce qu'il reste à brancher, avec le bouton pour y aller.`);
+}
 
 // ---------- Coût et usage de Claude ----------
 const usage = new UsageStore(config.dataDir);
@@ -1723,6 +1735,8 @@ function startConnectorGuard(): void {
 
 ipcMain.handle("memoire:lire", () => ({ faits: [...notes.memories()].reverse(), notes: notes.list(100), rappels: recall?.recents(8) ?? [] }));
 ipcMain.handle("rappel:retour", (_event, payload: { cle: string; avis: "utile" | "inutile" }) => (recall?.retour(payload.cle, payload.avis) ?? false) && { rappels: recall?.recents(8) ?? [] });
+const capaciteListe = () => capacites({ env, briefings: briefingStore.list().length, connecteurs: connectors.list().length, documentsBibliotheque: library.documents().length, motEveilActif: !!wakeEngine });
+ipcMain.handle("capacites:lire", () => ({ liste: capaciteListe(), bilan: bilan(capaciteListe()) }));
 ipcMain.handle("cout:lire", () => ({ resume: usage.summary(30), plafond: usagePlafond() ?? null, pauseAuto: env("USAGE_PAUSE_AUTO") !== "off", mode: env("ANTHROPIC_API_KEY") ? "cle-api" : "abonnement" }));
 ipcMain.handle("memoire:ajouter", (_event, fait: string) => (fait?.trim() ? notes.remember(fait.trim()) : null));
 ipcMain.handle("memoire:modifier", (_event, payload: { id: string; fait: string }) => notes.updateMemory(payload.id, payload.fait.trim()));
@@ -1986,6 +2000,7 @@ void app.whenReady().then(async () => {
   backups.start();
   startBriefings();
   if (!startupTest) startConnectorGuard();
+  if (!startupTest) setTimeout(welcomeOnce, 90_000);
   startScreenWatch();
   void startHealth();
   if (!startupTest) {
@@ -2161,4 +2176,4 @@ const suivi = traccarUrl
       appareil: env("VOITURE_TRACCAR_APPAREIL"),
     })
   : undefined;
-connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings: briefingActions, sante: () => healthStore.phrase(), cout: () => phraseUsage(usage.summary(30), usagePlafond()), voiture: () => (suivi ? suivi.phrase() : Promise.resolve("Le suivi de la voiture n'est pas configuré : va dans Réglages → Voiture (traceur GPS) pour relier ton serveur Traccar.")) });
+connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings: briefingActions, sante: () => healthStore.phrase(), cout: () => phraseUsage(usage.summary(30), usagePlafond()), capacites: () => phraseCapacites(capaciteListe()), voiture: () => (suivi ? suivi.phrase() : Promise.resolve("Le suivi de la voiture n'est pas configuré : va dans Réglages → Voiture (traceur GPS) pour relier ton serveur Traccar.")) });
