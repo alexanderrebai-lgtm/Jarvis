@@ -3,7 +3,7 @@
  * demande, chacune sur l'écran qui lui est attribué.
  */
 
-export type PageId = "accueil" | "ingenieur" | "travail" | "code" | "rd" | "securite" | "performances" | "diagnostic" | "reglages" | "journal";
+export type PageId = "accueil" | "ingenieur" | "travail" | "code" | "rd" | "securite" | "performances" | "diagnostic" | "reglages" | "journal" | "sante";
 
 export interface PageInfo {
   id: PageId;
@@ -27,6 +27,7 @@ export const PAGES: PageInfo[] = [
   { id: "securite", annonce: "Voilà les caméras.", titre: "Sécurité", mots: ["securite", "surveillance", "camera", "cameras", "videosurveillance", "alarme"], ecranParDefaut: "droite" },
   { id: "performances", annonce: "Voilà l'état du PC.", titre: "Performances du PC", mots: ["performance", "performances", "pc", "ordinateur", "processeur", "carte graphique", "temperatures", "systeme", "ressources"], ecranParDefaut: "gauche" },
   { id: "diagnostic", annonce: "Voilà mon bilan de santé.", titre: "Diagnostic", mots: ["diagnostic", "etat de jarvis", "verification", "bilan"], ecranParDefaut: "droite" },
+  { id: "sante", annonce: "Je fais le bilan de santé du PC.", titre: "Santé du PC", mots: ["sante du pc", "sante de l'ordinateur", "sante", "diagnostic du pc", "diagnostic de l'ordinateur", "bilan du pc", "rapport du pc", "optimise le pc", "optimisation"], ecranParDefaut: "droite" },
   { id: "journal", annonce: "Voilà mon journal.", titre: "Journal", mots: ["journal", "historique", "ce que tu as fait", "activite", "evenements"], ecranParDefaut: "droite" },
   { id: "reglages", annonce: "Voilà les réglages.", titre: "Réglages", mots: ["reglages", "parametres", "configuration", "options"], ecranParDefaut: "droite" },
 ];
@@ -53,10 +54,13 @@ export type PageCommand =
   | { action: "deplacer"; pages: PageId[]; ecran: ScreenName | "principal" };
 
 function findPages(text: string): PageId[] {
-  const found: PageId[] = [];
+  const hits: Array<{ id: PageId; mot: string }> = [];
   for (const page of PAGES) {
-    if (page.mots.some((mot) => new RegExp(`(^| )${mot.replace(/[&]/g, "\\&")}( |$)`).test(text))) found.push(page.id);
+    const mot = page.mots.filter((m) => new RegExp(`(^| )${m.replace(/[&]/g, "\\&")}( |$)`).test(text)).sort((a, b) => b.length - a.length)[0];
+    if (mot) hits.push({ id: page.id, mot });
   }
+  // « diagnostic du pc » désigne la santé du PC, pas aussi « diagnostic » et « pc » : un mot inclus dans une expression plus longue trouvée ne compte pas.
+  const found = hits.filter((h) => !hits.some((o) => o !== h && o.mot.length > h.mot.length && o.mot.includes(h.mot))).map((h) => h.id);
   // « la page code de la course » : on évite les doublons évidents (rendu = code, pas autre chose).
   return found;
 }

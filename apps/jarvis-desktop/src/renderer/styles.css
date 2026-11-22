@@ -455,3 +455,14 @@ body.cockpit .panel h4 b { color: var(--orange); font-weight: 600; }
 
 /* ---------- Mode jeu : animations CSS en pause ---------- */
 body.mode-jeu *, body.mode-jeu *::before, body.mode-jeu *::after { animation-play-state: paused !important; }
+
+/* ---------- Santé du PC ---------- */
+.health-status { margin: 8px 14px 12px; min-height: 1.2em; font-size: 13px; }
+.health-web .health-text { margin-top: 12px; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.health-web a { color: var(--cyan, #39d0ff); }
+.health-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.check button + button { margin-left: 6px; }
+.health-machine { margin: 0 0 8px; padding: 0 10px; font-size: 13px; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
+.health-button { border: 1px solid var(--hud); background: rgba(var(--hud-rgb), 0.1); color: var(--text); border-radius: 8px; padding: 7px 12px; cursor: pointer; font: 500 12px "Inter"; margin-top: 6px; }
+.health-button:hover { background: rgba(var(--hud-rgb), 0.22); }
+.health-button:disabled { opacity: 0.5; cursor: wait; }

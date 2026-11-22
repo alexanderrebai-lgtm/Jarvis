@@ -309,6 +309,7 @@ export const PAGE_ICONS: Array<{ id: string; label: string; icon: string }> = [
   { id: "securite", label: "Sécurité", icon: SVG('<path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/>') },
   { id: "performances", label: "Performances", icon: SVG('<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>') },
   { id: "reglages", label: "Réglages", icon: SVG('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9 7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>') },
+  { id: "sante", label: "Santé du PC", icon: SVG('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/><path d="M6 10h3l1.5-3 2 6 1.5-3H18"/>') },
   { id: "journal", label: "Journal", icon: SVG('<path d="M5 3h11l3 3v15H5z"/><path d="M8 9h8M8 13h8M8 17h5"/>') },
   { id: "diagnostic", label: "Diagnostic", icon: SVG('<path d="M4 12h3l2-5 4 10 2-5h5"/><circle cx="12" cy="12" r="10"/>') },
 ];

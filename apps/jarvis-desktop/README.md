@@ -271,6 +271,17 @@ Dès qu'un jeu est détecté (ou sur « Jarvis, mode jeu », ou par le menu de l
 
 À la sortie du jeu, tout reprend. Hors jeu, la voix locale se décharge seule après 20 minutes sans parler et se recharge en arrière-plan (la première phrase part alors en voix en ligne). Réglages → Toi et ta ville : désactiver le mode jeu automatique, ajouter d'autres jeux.
 
+## Santé du PC
+
+Page « Santé du PC » (ou « Jarvis, ouvre le diagnostic du PC ») :
+- lit ce que Windows garde sur 30 jours : arrêts brutaux (Kernel-Power 41 : coupure sans écran bleu ou écran bleu avec son code), erreurs matérielles (WHEA), plantages du pilote graphique, rapports de plantage ;
+- état de la carte NVIDIA (température, puissance, limite, pilote), mémoire (profil XMP), disques, plan d'alimentation, mode jeu, planification GPU, programmes au démarrage, âge du BIOS ;
+- pendant chaque partie, la température et la puissance de la carte graphique sont écrites sur le disque toutes les 15 s : après un arrêt brutal, le bilan montre l'état de la carte juste avant ;
+- après un redémarrage qui suit un arrêt brutal, Jarvis fait le bilan tout seul et prévient ;
+- « Chercher des solutions sur Internet » : Claude cherche les causes connues pour ce matériel et ces symptômes et propose des actions ;
+- actions sur clic seulement, réversibles : plan « Performances élevées », test de limite de la carte graphique à 80 % (jusqu'au redémarrage, Windows demande l'autorisation), nettoyage des fichiers temporaires, raccourcis vers les réglages de Windows ;
+- « Rapport » enregistre le bilan dans Documents\Jarvis\rapports.
+
 ## Adapté au PC
 
 Au démarrage, Jarvis lit le matériel (page Diagnostic → Profil matériel) et se règle :
