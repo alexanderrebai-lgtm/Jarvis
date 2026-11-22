@@ -67,6 +67,9 @@ import { BackgroundTasks } from "./tasks.js";
 import { explainGoogle, findTelegramChat, googleSignIn, parseEnv, SettingsStore, updateEnvText } from "./settings.js";
 import { openSecrets, sealSecrets, mergeEnvText } from "./secret-backup.js";
 import { describeLost, Watchdog } from "./watchdog.js";
+import { createPcCare } from "./pc-care.js";
+import { createSettingActions } from "./settings-actions.js";
+import { createDiagnostics } from "./diagnostic-checks.js";
 import { buildProfile, describeProfile, tune } from "./hardware.js";
 import { analyzeHealth, collectHealth, GameRecorder, HEALTH_ACTIONS, healthReport, healthSummaryForWeb, runHealthAction, type Finding, type HealthActionId, type HealthRaw } from "./pc-health.js";
 import { resilientFetch } from "./net-fetch.js";
@@ -266,7 +269,7 @@ function updateTray(): void {
       { label: "Micro", type: "checkbox", checked: flags.micro, click: () => setFlag("micro", !flags.micro) },
       { label: "Caméras", type: "checkbox", checked: flags.cameras, click: () => setFlag("cameras", !flags.cameras) },
       { label: "Ne pas déranger", type: "checkbox", checked: flags.doNotDisturb, click: () => setFlag("doNotDisturb", !flags.doNotDisturb) },
-      { label: "Mode jeu (libère la carte graphique)", type: "checkbox", checked: flags.jeu, click: () => ((gameManual = !flags.jeu), updateGameMode()) },
+      { label: "Mode jeu (libère la carte graphique)", type: "checkbox", checked: flags.jeu, click: () => (pcCare.setGameManual(!flags.jeu), updateGameMode()) },
       { label: "Surveillance", submenu: (["off", "simple", "complete"] as const).map((m) => ({ label: { off: "Arrêtée", simple: "Simple", complete: "Complète" }[m], type: "radio" as const, checked: flags.surveillance === m, click: () => setSurveillance(m) })) },
       { type: "separator" },
       { label: "Diagnostic", click: () => pages.openPage("diagnostic") },
@@ -548,153 +551,20 @@ const games = new GameWatcher({
   processes: [...DEFAULT_GAME_PROCESSES, ...(env("JEUX_PROCESSUS") ?? "").split(",").map((s) => s.trim()).filter(Boolean)],
   onChange: (running) => {
     pages.setGameRunning(running.length > 0 || race.active);
-    gameManual = undefined;
+    pcCare.setGameManual(undefined);
     updateGameMode();
   },
 });
 
-// ---------- Santé du PC ----------
-
-const reportsDir = path.join(workspace, "rapports");
-const gameRecorder = new GameRecorder(reportsDir);
-let lastHealth: { raw: HealthRaw; constats: Finding[]; date: string; analyseWeb?: string } | undefined;
-
-const machineName = () => describeProfile(hardware, tuning).split(" · calculs")[0]!;
-
-async function healthCheck(): Promise<NonNullable<typeof lastHealth>> {
-  const raw = await collectHealth(gameRecorder);
-  lastHealth = { raw, constats: analyzeHealth(raw, { alimentation: env("PC_ALIMENTATION") }), date: new Date().toISOString() };
-  actions.add({ outil: "santé du PC", resume: lastHealth.constats.map((c) => `${c.gravite} : ${c.titre}`).join(" ; ").slice(0, 400), autorise: true });
-  return lastHealth;
+// Santé du PC, puce graphique de l'interface et mode jeu : voir pc-care.ts
+function checkLastShutdown() {
+  return pcCare.checkLastShutdown();
 }
-
-/** Recherche en ligne : Claude cherche les solutions connues pour ce matériel et ces symptômes. */
-async function healthWebAdvice(): Promise<{ texte: string; actions: Array<{ id: HealthActionId; libelle: string }> }> {
-  const health = lastHealth ?? (await healthCheck());
-  const allowed = Object.entries(HEALTH_ACTIONS).map(([id, libelle]) => `${id} (${libelle})`).join(", ");
-  const r = await brain.ask(
-    `Tu es l'expert matériel de ${ownerName}. Voici le bilan de son PC (aucune donnée personnelle) :\n${healthSummaryForWeb(health.raw, health.constats, machineName(), env("PC_ALIMENTATION"))}\n\n` +
-      "Cherche sur Internet (WebSearch, WebFetch) les causes et solutions connues pour CE matériel et CES symptômes : arrêts brutaux en jeu, pics de consommation de la carte graphique, versions de pilote ou de BIOS problématiques, réglages recommandés pour un simulateur comme Le Mans Ultimate. " +
-      "Réponds en français, en tutoyant, avec : 1) la cause la plus probable et pourquoi ; 2) au plus 6 actions classées de la plus utile à la moins utile, chacune en une ou deux phrases concrètes ; 3) les sources (liens). " +
-      `Quand une action correspond à un bouton de Jarvis, ajoute à la fin de la ligne la balise [action:ID], avec ID parmi : ${allowed}. N'invente pas d'autre balise. Ne propose rien de risqué (overclocking, registre à la main, logiciels douteux).`,
-    {},
-    { separate: true },
-  );
-  const ids = [...new Set([...r.text.matchAll(/\[action:([a-z-]+)\]/g)].map((m) => m[1] as HealthActionId).filter((id) => id in HEALTH_ACTIONS))];
-  const texte = r.text.replace(/\s*\[action:[a-z-]+\]/g, "").trim();
-  health.analyseWeb = texte;
-  return { texte, actions: ids.map((id) => ({ id, libelle: HEALTH_ACTIONS[id] })) };
+function applyGpuPreference() {
+  return pcCare.applyGpuPreference();
 }
-
-function saveHealthReport(): string | undefined {
-  if (!lastHealth) return undefined;
-  mkdirSync(reportsDir, { recursive: true });
-  const file = path.join(reportsDir, `sante-${lastHealth.date.slice(0, 16).replace(/[:T]/g, "-")}.md`);
-  writeFileSync(file, healthReport(lastHealth.raw, lastHealth.constats, { machine: machineName(), ...(lastHealth.analyseWeb ? { analyseWeb: lastHealth.analyseWeb } : {}) }));
-  return file;
-}
-
-/** Après un redémarrage qui suit un arrêt brutal : bilan automatique et message. */
-async function checkLastShutdown(): Promise<void> {
-  if (process.platform !== "win32" || uptime() > 30 * 60) return;
-  const seenFile = path.join(config.dataDir, "dernier-arret-vu.txt");
-  const seen = existsSync(seenFile) ? readFileSync(seenFile, "utf8").trim() : "";
-  const health = await healthCheck();
-  const last = health.raw.arretsBrutaux[0];
-  if (!last || last.date <= seen) return;
-  writeFileSync(seenFile, last.date);
-  const at = new Date(last.date).toLocaleString("fr-FR", { weekday: "long", hour: "2-digit", minute: "2-digit" });
-  const kind = last.bugcheck === 0 ? "s'est éteint brutalement" : "a planté (écran bleu)";
-  host.notify("Arrêt brutal du PC", `Le PC ${kind} ${at}. Bilan prêt : page Santé du PC.`);
-  broadcast("jarvis:message", { from: "jarvis", text: `Le PC ${kind} ${at}. J'ai fait le bilan : ouvre la page Santé du PC.` });
-}
-
-ipcMain.handle("sante:bilan", async (_event, refresh?: boolean) => {
-  const health = refresh || !lastHealth ? await healthCheck() : lastHealth;
-  return { ...health, machine: machineName(), alimentation: env("PC_ALIMENTATION") ?? null, enJeu: flags.jeu };
-});
-ipcMain.handle("sante:action", async (_event, id: string) => {
-  if (!(id in HEALTH_ACTIONS)) return { ok: false, message: "Action inconnue." };
-  const nvidia = lastHealth?.raw.nvidia ?? (await collectHealth(gameRecorder)).nvidia;
-  const message = await runHealthAction(id as HealthActionId, nvidia, (url) => void shell.openExternal(url));
-  actions.add({ outil: "santé du PC", resume: `${HEALTH_ACTIONS[id as HealthActionId]} : ${message}`.slice(0, 400), autorise: true });
-  return { ok: true, message };
-});
-ipcMain.handle("sante:web", async () => {
-  try {
-    return { ok: true, ...(await healthWebAdvice()) };
-  } catch (error) {
-    return { ok: false, texte: `Recherche impossible : ${error instanceof Error ? error.message : String(error)}`, actions: [] };
-  }
-});
-ipcMain.handle("sante:rapport", () => {
-  const file = saveHealthReport();
-  if (file) void shell.openPath(file);
-  return file ?? null;
-});
-
-// ---------- Puce graphique de l'interface ----------
-
-let gpuPreferenceNote = "";
-/**
- * Avec un processeur à puce graphique intégrée (Ryzen « G »), l'affichage de Jarvis peut tourner sur cette puce :
- * la carte NVIDIA reste entière pour les jeux et l'IA. Réglage Windows « préférence graphique » de Jarvis.exe,
- * appliqué au prochain démarrage de Jarvis.
- */
-async function applyGpuPreference(): Promise<void> {
-  if (process.platform !== "win32" || !app.isPackaged) return;
-  const choice = env("GPU_INTERFACE") ?? "auto";
-  const key = "HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences";
-  const value = choice === "integree" || (choice === "auto" && hardware.integre) ? "GpuPreference=1;" : choice === "nvidia" ? "GpuPreference=2;" : undefined;
-  const args = value ? ["add", key, "/v", process.execPath, "/t", "REG_SZ", "/d", value, "/f"] : ["delete", key, "/v", process.execPath, "/f"];
-  await new Promise<void>((resolve) => execFile("reg", args, { windowsHide: true, timeout: 10_000 }, () => resolve()));
-  gpuPreferenceNote = value === "GpuPreference=1;" ? `interface sur la puce intégrée (${hardware.integre?.modele ?? "processeur"})` : value ? "interface sur la carte NVIDIA" : "choix laissé à Windows";
-}
-
-// ---------- Mode jeu : la carte graphique et le processeur reviennent au jeu ----------
-
-/** Choix manuel (menu de l'icône) ; undefined = automatique selon les jeux détectés. */
-let gameManual: boolean | undefined;
 function updateGameMode(): void {
-  const auto = env("MODE_JEU") !== "off" && (games.active || race.active);
-  void applyGameMode(gameManual ?? auto);
-}
-
-async function applyGameMode(on: boolean): Promise<void> {
-  if (on === flags.jeu) return;
-  flags.jeu = on;
-  broadcast("jarvis:flags", flags);
-  updateTray();
-  // Voix locale (plusieurs Go sur la carte graphique) : arrêtée, la voix en ligne prend le relais.
-  // IA locale (Ollama) : modèles déchargés de la carte graphique. Pages fermées : mémoire libérée.
-  if (on) {
-    localVoice.stop();
-    void localAI.unloadAll().catch(() => undefined);
-    pages.releaseHidden();
-  }
-  // Reconnaissance vocale : petit modèle sur le processeur pendant le jeu.
-  ears.setLight(on);
-  // Mesures du PC plus espacées.
-  perf.setInterval(on ? 20_000 : 3_000);
-  setLowPriority(on);
-  // Température et puissance de la carte graphique notées pendant la partie (utile après un arrêt brutal).
-  if (on) gameRecorder.start();
-  else gameRecorder.stop();
-  actions.add({ outil: "mode jeu", resume: on ? `Activé${games.games.length ? ` (${games.games.join(", ")})` : ""} : voix locale arrêtée, reconnaissance vocale allégée, animations en pause.` : "Désactivé : Jarvis reprend ses réglages habituels.", autorise: true, origine: "automatique" });
-  if (!on && env("VOIX_MOTEUR") === "locale" && localVoice.installed) setTimeout(() => !flags.jeu && void localVoice.start(), 30_000);
-}
-
-/** Pendant un jeu, tous les processus de Jarvis passent en priorité basse (Windows donne la main au jeu). */
-function setLowPriority(low: boolean): void {
-  const level = low ? osConstants.priority.PRIORITY_BELOW_NORMAL : osConstants.priority.PRIORITY_NORMAL;
-  const pids = new Set<number>([process.pid, ...app.getAppMetrics().map((m) => m.pid), ...(localVoice.pid ? [localVoice.pid] : [])]);
-  for (const pid of pids) {
-    try {
-      setPriority(pid, level);
-    } catch {
-      // processus déjà terminé ou protégé
-    }
-  }
+  pcCare.updateGameMode();
 }
 
 // ---------- Apprendre, chercher, calculer ----------
@@ -1373,75 +1243,9 @@ const watchdog = new Watchdog({
 let lastDiagnostic: Awaited<ReturnType<typeof runChecks>> | undefined;
 let senses = { micro: false, cameras: 0, gestes: false, detecteur: false };
 
+// Bilan de Jarvis (page Diagnostic) : voir diagnostic-checks.ts
 async function runDiagnostic() {
-  const checks: Check[] = [
-    { id: "claude", groupe: "Cerveau", titre: "Connexion à Claude", run: () => {
-      const r = claudeLoginCheck();
-      return r.etat === "ok" ? r : { ...r, conseil: "Réglages → Cerveau → « Se connecter à Claude ».", action: { libelle: "Se connecter à Claude", reglages: "cerveau" } };
-    } },
-    { id: "ia-locale", groupe: "Cerveau", titre: "IA locale (secours)", run: async () => {
-      const models = await localAI.models().catch(() => undefined);
-      if (!models?.length) return { etat: "absent", detail: "Ollama n'est pas installé ou n'a pas de modèle.", conseil: `Installe Ollama (ollama.com), puis « ollama pull ${tuning.ollamaConseille} » (taille adaptée à ta carte graphique) : Jarvis répondra même sans Internet.` };
-      const vram = (hardware.nvidia?.vramMo ?? 0) / 1024;
-      const tooBig = vram ? models.filter((m) => m.tailleGo > vram * 0.85 && !/embed/.test(m.nom)) : [];
-      return { etat: tooBig.length === models.length ? "attention" : "ok", detail: `${models.length} modèle(s) : ${models.slice(0, 4).map((m) => m.nom).join(", ")}.${tooBig.length ? ` Trop gros pour ta carte graphique (lents) : ${tooBig.map((m) => m.nom).join(", ")}.` : ""}`, ...(tooBig.length === models.length ? { conseil: `Prends « ollama pull ${tuning.ollamaConseille} » : il tient entièrement dans la carte graphique.` } : {}) };
-    } },
-    { id: "materiel", groupe: "PC", titre: "Profil matériel", run: () => ({ etat: "ok", detail: `${describeProfile(hardware, tuning)}${gpuPreferenceNote ? ` · ${gpuPreferenceNote}` : ""}.` }) },
-    { id: "oreilles", groupe: "Voix", titre: "Reconnaissance vocale", run: () => (ears.loadError ? { etat: "erreur", detail: ears.loadError, conseil: "Vérifie la connexion (le modèle se télécharge au premier lancement)." } : { etat: ears.activeDevice ? "ok" : "attention", detail: `${ears.model} sur ${ears.activeDevice === "dml" ? "la carte graphique" : ears.activeDevice === "cpu" ? "le processeur" : "chargement…"}` }) },
-    { id: "voix", groupe: "Voix", titre: "Voix de Jarvis", run: () => {
-      if (env("VOIX_MOTEUR") === "locale") {
-        if (!localVoice.installed) return { etat: "attention", detail: "Voix locale choisie mais pas installée : Jarvis parle avec la voix en ligne.", action: { libelle: "Installer la voix locale", reglages: "voix" } };
-        return { etat: localVoice.status === "erreur" ? "erreur" : "ok", detail: `Voix locale ${localVoice.status === "prete" ? `prête (${localVoice.device === "cuda" ? "carte graphique" : "processeur"})` : localVoice.status === "erreur" ? `en erreur : ${localVoice.lastError ?? ""}` : "installée (démarre à la première phrase)"}.` };
-      }
-      return { etat: voice.mode === "en ligne" ? "ok" : "attention", detail: voice.mode === "en ligne" ? "Voix neuronale Microsoft en ligne." : `Voix de secours Windows (${voice.lastError ?? "voix en ligne injoignable"}).` };
-    } },
-    { id: "empreinte", groupe: "Voix", titre: "Verrou vocal", run: () => (voiceLock.enrolled ? { etat: "ok", detail: `Ta voix est enregistrée (seuil ${voiceLock.threshold}).` } : { etat: "attention", detail: "Pas d'empreinte : n'importe quelle voix peut commander Jarvis.", conseil: "Dis « Jarvis, apprends ma voix » et répète les cinq phrases.", action: { libelle: "Apprendre ma voix", commande: "apprends ma voix" } }) },
-    { id: "micro", groupe: "Sens", titre: "Micro et caméras", run: () => ({ etat: senses.micro ? "ok" : "erreur", detail: `Micro ${senses.micro ? "actif" : "indisponible"} · ${senses.cameras} webcam(s) · gestes ${senses.gestes ? "actifs" : "inactifs"} · détecteur de personne ${senses.detecteur ? "prêt" : "non chargé"}`, ...(senses.micro ? {} : { conseil: "Paramètres Windows → Confidentialité → Microphone : autorise les applications de bureau." }) }) },
-    { id: "google", groupe: "Services", titre: "Gmail et Agenda", run: async () => (agenda ? await agenda.list(new Date(), new Date(Date.now() + 3_600_000)).then(() => ({ etat: "ok" as const, detail: "Connecté." }), (error: unknown) => ({ etat: "erreur" as const, detail: explainGoogle(error instanceof Error ? error.message : String(error)), conseil: "Réglages → Gmail et Google Agenda → « Se connecter avec Google ».", action: { libelle: "Reconnecter Google", reglages: "google" } })) : { etat: "absent" as const, detail: "Non configuré.", conseil: "Page Réglages → Gmail et Google Agenda.", action: { libelle: "Relier Google", reglages: "google" } }) },
-    { id: "tapo", groupe: "Maison", titre: "Ampoules et prises Tapo", run: async () => {
-      if (!tapo) return { etat: "absent", detail: "Non configuré.", action: { libelle: "Relier Tapo", reglages: "tapo" } };
-      const states = await tapo.states();
-      const down = states.filter((s) => s.allume === null);
-      return { etat: down.length ? "attention" : "ok", detail: `${states.length} appareil(s)${down.length ? `, injoignables : ${down.map((d) => d.nom).join(", ")}` : ""}` };
-    } },
-    { id: "cameras", groupe: "Maison", titre: "Caméras de surveillance", run: () => (security.enabled ? { etat: security.streams().every((s) => s.enDirect) ? "ok" : "attention", detail: security.streams().map((s) => `${s.nom} ${s.enDirect ? "en direct" : "hors ligne"}`).join(", ") } : { etat: "absent", detail: "Aucune caméra configurée.", action: { libelle: "Relier les caméras", reglages: "cameras" } }) },
-    { id: "alertes", groupe: "Maison", titre: "Alertes sur le téléphone", run: () => (phone.enabled ? { etat: "ok", detail: "Telegram prêt." } : { etat: "absent", detail: "Pas d'alerte téléphone.", action: { libelle: "Relier Telegram", reglages: "alertes" } }) },
-    { id: "spotify", groupe: "Réveil", titre: "Spotify", run: async () => {
-      if (!spotify.configured) return { etat: "absent", detail: "Pas d'appli Spotify (SPOTIFY_CLIENT_ID).", conseil: "Crée l'appli sur developer.spotify.com, colle son Client ID dans les Réglages, puis « Connecter ».", action: { libelle: "Relier Spotify", reglages: "spotify" } };
-      if (!spotify.connected) return { etat: "attention", detail: "Appli créée, compte pas encore relié.", action: { libelle: "Connecter Spotify", commande: "connecte Spotify" } };
-      const devices = await spotify.devices();
-      return { etat: "ok", detail: `Relié. Appareils : ${devices.map((d) => d.name).join(", ") || "aucun (ouvre l'appli Spotify)"}.` };
-    } },
-    { id: "planning", groupe: "Réveil", titre: "Planning de travail", run: async () => {
-      if (!env("PLANNING_FICHIER")) return { etat: "absent", detail: "Pas de planning (PLANNING_FICHIER) : réveil à l'heure habituelle.", conseil: "Choisis ton fichier de planning dans les Réglages.", action: { libelle: "Choisir le planning", reglages: "reveil" } };
-      const info = await planning.read();
-      if (!info) return { etat: "erreur", detail: `Fichier introuvable : ${env("PLANNING_FICHIER")}` };
-      return { etat: info.horaires.length ? "ok" : "attention", detail: `${info.horaires.length} jour(s) trouvés (${info.methode}).` };
-    } },
-    { id: "reveil", groupe: "Réveil", titre: "Prochain réveil", run: async () => {
-      if (!wake) return { etat: "absent", detail: "Réveil désactivé (REVEIL=off)." };
-      const next = await wake.refresh();
-      return next ? { etat: "ok", detail: `${next.date} à ${next.heure} — ${next.raison}.` } : { etat: "attention", detail: "Aucun réveil dans les 8 jours." };
-    } },
-    { id: "sauvegardes", groupe: "Sécurité des données", titre: "Sauvegardes", run: () => (backups.last?.erreur ? { etat: "erreur", detail: backups.last.erreur } : backups.last ? { etat: "ok", detail: `Dernière : ${backups.last.date}.` } : { etat: "attention", detail: "Pas encore de sauvegarde (la première se fait cette nuit).", action: { libelle: "Sauvegarder maintenant", commande: "lance une sauvegarde" } }) },
-    { id: "coffre-portable", groupe: "Sécurité des données", titre: "Copie des mots de passe", run: () => {
-      if (!env("SAUVEGARDE_MOT_DE_PASSE")) return { etat: "attention", detail: "Pas de mot de passe de sauvegarde : après une réinstallation de Windows, il faudrait tout reconnecter.", action: { libelle: "Choisir un mot de passe", reglages: "sauvegardes" } };
-      const date = secretCopyDate();
-      return date ? { etat: "ok", detail: `Copie chiffrée du ${date} (avec chaque sauvegarde).` } : { etat: "attention", detail: "Mot de passe choisi, copie pas encore faite.", action: { libelle: "Sauvegarder maintenant", reglages: "sauvegardes" } };
-    } },
-    { id: "coffre", groupe: "Sécurité des données", titre: "Coffre-fort des mots de passe", run: () => (vault.available ? { etat: "ok", detail: `${vault.keys().length} secret(s) chiffré(s) par Windows${movedSecrets.length ? ` (déplacés de jarvis.env : ${movedSecrets.join(", ")})` : ""}.` } : { etat: "attention", detail: "Chiffrement indisponible : les mots de passe restent dans jarvis.env." }) },
-    { id: "labo", groupe: "Recherche", titre: "Labo de calcul (Python)", run: async () => (lab.ready ? { etat: "ok", detail: "Environnement prêt." } : (await lab.findPython()) ? { etat: "attention", detail: "Python trouvé, labo pas encore préparé.", action: { libelle: "Préparer le labo", commande: "prépare le labo de calcul" } } : { etat: "absent", detail: "Python absent.", conseil: "winget install -e --id Python.Python.3.12" }) },
-    { id: "bibliotheque", groupe: "Recherche", titre: "Bibliothèque", run: () => ({ etat: "ok", detail: `${library.status().documents} document(s), ${library.status().passages} passages${library.status().semantique ? ", recherche par le sens active" : ""}. Dossier : ${library.status().dossier}` }) },
-    { id: "openalex", groupe: "Recherche", titre: "OpenAlex", run: () => (env("OPENALEX_CLE") ? { etat: "ok", detail: "Clé réglée." } : { etat: "absent", detail: "Sans clé, OpenAlex est ignoré (arXiv, Semantic Scholar et PubMed restent actifs).", action: { libelle: "Ajouter la clé", reglages: "cerveau" } }) },
-    { id: "arduino", groupe: "Atelier", titre: "arduino-cli", run: async () => ((await micro.find()) ? { etat: "ok", detail: "Installé." } : { etat: "absent", detail: "Non installé.", conseil: "winget install -e --id ArduinoSA.CLI" }) },
-    { id: "disque", groupe: "PC", titre: "Espace disque", run: async () => {
-      const p = perf.current ?? (await perf.sample());
-      const tight = p?.disques.filter((d) => d.utilisePct >= 90) ?? [];
-      return { etat: tight.length ? "attention" : "ok", detail: tight.length ? `Presque plein : ${tight.map((d) => `${d.lecteur} (${d.utilisePct} %)`).join(", ")}` : "Assez d'espace." };
-    } },
-    { id: "version", groupe: "PC", titre: "Version et mises à jour", run: () => ({ etat: updateStatus.startsWith("Impossible") ? "attention" : "ok", detail: `Version ${app.getVersion()}${app.isPackaged ? "" : " (mode développement)"}. ${updateStatus}`, action: { libelle: "Chercher une mise à jour", reglages: "sauvegardes" } }) },
-  ];
-  lastDiagnostic = await runChecks(checks);
+  lastDiagnostic = await diagnostics.runDiagnostic();
   return lastDiagnostic;
 }
 
@@ -1649,9 +1453,10 @@ async function handleCommand(text: string, source: "voix" | "clavier", trust: "p
   // « Mode jeu » à la demande (en plus de la détection automatique des jeux).
   const gameAsk = command.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
   if (/^((active|passe en|lance|mets) )?(le )?mode jeu$/.test(gameAsk) || /^((desactive|quitte|arrete|coupe|enleve|sors du) (le )?mode jeu)$/.test(gameAsk)) {
-    gameManual = !/^(desactive|quitte|arrete|coupe|enleve|sors)/.test(gameAsk);
+    const wanted = !/^(desactive|quitte|arrete|coupe|enleve|sors)/.test(gameAsk);
+    pcCare.setGameManual(wanted);
     updateGameMode();
-    reply(gameManual ? "Mode jeu. Je libère la carte graphique et je me fais légère." : "Mode jeu terminé. Je reprends mes réglages habituels.");
+    reply(wanted ? "Mode jeu. Je libère la carte graphique et je me fais légère." : "Mode jeu terminé. Je reprends mes réglages habituels.");
     return;
   }
   const intent = parseIntent(command);
@@ -2026,150 +1831,9 @@ function applySettings(keys: string[]): void {
   if (keys.some((k) => k.startsWith("REVEIL") || k.startsWith("PLANNING"))) void wake?.refresh();
 }
 
-/** Une image d'une caméra (pour le bouton « Tester »). */
-function grabCameraFrame(ip: string, user: string, password: string): Promise<string | undefined> {
-  const bin = (ffmpegPath as unknown as string | null) ?? undefined;
-  if (!bin) return Promise.resolve(undefined);
-  return new Promise((resolve) => {
-    const child = spawn(bin, ["-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-i", rtspUrl({ nom: "test", ip }, user, password, "basse"), "-frames:v", "1", "-f", "image2", "-vcodec", "mjpeg", "pipe:1"], { windowsHide: true });
-    const chunks: Buffer[] = [];
-    const timer = setTimeout(() => child.kill(), 12_000);
-    child.stdout.on("data", (d: Buffer) => chunks.push(d));
-    child.on("close", () => {
-      clearTimeout(timer);
-      resolve(chunks.length ? `data:image/jpeg;base64,${Buffer.concat(chunks).toString("base64")}` : undefined);
-    });
-    child.on("error", () => resolve(undefined));
-  });
-}
-
-async function runSettingAction(id: string): Promise<{ ok: boolean; message: string; images?: Array<{ nom: string; src: string }>; redemarrage?: boolean }> {
-  try {
-    switch (id) {
-      case "meteo": {
-        const w = await weather.setCity(env("JARVIS_VILLE"));
-        return w ? { ok: true, message: `${w.ville} : ${w.maintenant.temperature} °C, ${w.maintenant.libelle.toLowerCase()}.` } : { ok: false, message: "Ville introuvable ou pas de réponse d'Open-Meteo." };
-      }
-      case "tapo": {
-        if (!env("TAPO_EMAIL") || !env("TAPO_PASSWORD")) return { ok: false, message: "Renseigne l'e-mail et le mot de passe, puis enregistre." };
-        const test = new TapoHome(realTapoDriver(env("TAPO_EMAIL")!, env("TAPO_PASSWORD")!, parseDeviceList(env("TAPO_DEVICES"))), { cacheFile: tapoCache, cacheKey: env("TAPO_EMAIL")!.toLowerCase() });
-        // Liste déjà connue : on teste les appareils sans se reconnecter au compte TP-Link.
-        if (!test.known || parseDeviceList(env("TAPO_DEVICES")).length) await test.refresh().catch((error: unknown) => {
-          if (!test.known) throw error;
-        });
-        const states = await test.states();
-        if (!states.length) return { ok: false, message: "Connexion faite, mais aucun appareil trouvé. Vérifie que le PC est sur le même réseau que tes ampoules, ou liste-les avec leur adresse IP." };
-        const down = states.filter((d) => d.allume === null);
-        const notFound = down.filter((d) => /introuvable sur le réseau|not found/i.test((d as { erreur?: string }).erreur ?? ""));
-        const hint = !down.length
-          ? ""
-          : notFound.length === down.length
-            ? ` ${down.map((d) => d.nom).join(", ")} : pas trouvé${down.length > 1 ? "s" : ""} sur le réseau de la maison. Vérifie qu'ils sont alimentés (interrupteur allumé), puis réessaie dans une minute. Si ça persiste, indique leur adresse IP dans « Appareils » (appli Tapo → appareil → roue dentée → Infos de l'appareil).`
-            : " Injoignables en direct depuis le PC : dans l'appli Tapo, va dans Moi → Tapo Lab → « Compatibilité tierce » (Third-Party Compatibility) et active-la, puis réessaie. Vérifie aussi que le PC et les ampoules sont sur la même box (pas le Wi-Fi invité). Détail : " + down.map((d) => `${d.nom} : ${(d as { erreur?: string }).erreur ?? "pas de réponse"}`).join(" ; ");
-        return { ok: down.length === 0, message: `${states.length} appareil(s) : ${states.map((d) => `${d.nom}${d.allume === null ? " (injoignable)" : d.allume ? " (allumé)" : " (éteint)"}`).join(", ")}.${hint}`, redemarrage: !tapo };
-      }
-      case "google": {
-        if (!env("GOOGLE_CLIENT_ID") || !env("GOOGLE_CLIENT_SECRET")) return { ok: false, message: "Colle d'abord l'ID client et le code secret, puis enregistre." };
-        const signed = await googleSignIn({ clientId: env("GOOGLE_CLIENT_ID")!, clientSecret: env("GOOGLE_CLIENT_SECRET")!, scopes: GOOGLE_SCOPES, open: (url) => void shell.openExternal(url) });
-        settings.save({ GOOGLE_REFRESH_TOKEN: signed.refreshToken });
-        return { ok: true, message: `Google est relié${signed.email ? ` (${signed.email})` : ""}. Redémarre Jarvis (bouton en haut) pour qu'il lise tes mails et ton agenda.`, redemarrage: true };
-      }
-      case "spotify":
-        return { ok: true, message: await spotifyHelpers.connect() };
-      case "planning": {
-        const info = await planning.read();
-        if (!info) return { ok: false, message: "Fichier introuvable. Choisis ton planning puis enregistre." };
-        const next = info.horaires.filter((h) => h.date >= new Date().toISOString().slice(0, 10)).slice(0, 7);
-        return info.horaires.length
-          ? { ok: true, message: `${info.horaires.length} jour(s) lus (${info.methode}). Prochains : ${next.map((h) => `${new Date(`${h.date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric" })} ${h.repos ? "repos" : `${h.debut ?? "?"}${h.fin ? `-${h.fin}` : ""}`}`).join(", ") || "aucun jour à venir"}.` }
-          : { ok: false, message: "Je n'ai pas trouvé tes horaires dans ce fichier. Vérifie ton nom (champ « Ton nom tel qu'il est écrit »), ou décris les codes du planning." };
-      }
-      case "reveil":
-        if (!wake) return { ok: false, message: "Le réveil est désactivé." };
-        await wake.test();
-        return { ok: true, message: "Le réveil sonne : dis « je suis debout »." };
-      case "cameras": {
-        const cams = parseCameras(env("TAPO_CAMERAS"));
-        if (!cams.length) return { ok: false, message: "Ajoute au moins une caméra (nom=adresse IP), puis enregistre." };
-        const images = await Promise.all(cams.map(async (c) => ({ nom: c.nom, src: (await grabCameraFrame(c.ip, env("TAPO_CAMERA_COMPTE") ?? "", env("TAPO_CAMERA_MOT_DE_PASSE") ?? "")) ?? "" })));
-        const ok = images.filter((i) => i.src);
-        return { ok: ok.length === cams.length, message: ok.length === cams.length ? "Toutes les caméras répondent." : `Sans réponse : ${images.filter((i) => !i.src).map((i) => i.nom).join(", ")} (adresse IP, identifiant ou mot de passe du compte caméra).`, images: ok, redemarrage: true };
-      }
-      case "telegram-chat": {
-        if (!env("TELEGRAM_BOT_TOKEN")) return { ok: false, message: "Colle d'abord le jeton du bot (donné par @BotFather), puis enregistre." };
-        if (!isTelegramToken(env("TELEGRAM_BOT_TOKEN"))) return { ok: false, message: "Ce n'est pas un jeton de bot : il ressemble à 123456789:AAH… (message de @BotFather après /newbot). Le nom qui finit par « _bot » ne suffit pas." };
-        const chat = await findTelegramChat(env("TELEGRAM_BOT_TOKEN")!);
-        if (!chat) return { ok: false, message: "Aucun message trouvé : envoie « bonjour » à ton bot dans Telegram, puis réessaie." };
-        settings.save({ TELEGRAM_CHAT_ID: chat.id });
-        return { ok: true, message: `Conversation trouvée${chat.nom ? ` (${chat.nom})` : ""} et enregistrée.` };
-      }
-      case "telegram":
-        if (!phone.enabled) return { ok: false, message: "Il manque le jeton ou l'identifiant de conversation." };
-        if (!isTelegramToken(env("TELEGRAM_BOT_TOKEN"))) return { ok: false, message: "Le jeton du bot n'a pas la bonne forme : il ressemble à 123456789:AAH… (message de @BotFather)." };
-        if (!isTelegramChatId(env("TELEGRAM_CHAT_ID"))) return { ok: false, message: `« ${env("TELEGRAM_CHAT_ID")} » n'est pas l'identifiant de ta conversation (c'est un nombre, pas le nom du bot). Envoie « bonjour » à ton bot dans Telegram, puis clique sur « Trouver ma conversation » : Jarvis le remplit tout seul.` };
-        await phone.text("Jarvis : essai des alertes. Si tu lis ceci, c'est relié.");
-        return { ok: true, message: "Message d'essai envoyé sur ton téléphone." };
-      case "voix":
-        void handleCommand("apprends ma voix", "clavier");
-        return { ok: true, message: "Répète les phrases que Jarvis te donne." };
-      case "claude": {
-        const exe = findClaudeExecutable();
-        if (!exe) return { ok: false, message: "Le moteur Claude n'est pas dans cette version de Jarvis : installe la dernière version depuis l'onglet Releases du dépôt Jarvis." };
-        if (process.platform !== "win32") return { ok: false, message: `Lance « ${exe} » dans un terminal pour te connecter.` };
-        // Fenêtre de Claude Code : au premier lancement, il propose la connexion avec ton compte.
-        spawn("cmd.exe", ["/c", "start", "Connexion à Claude", exe], { detached: true, stdio: "ignore", windowsHide: false }).unref();
-        return { ok: true, message: "Une fenêtre noire s'ouvre : choisis un thème (Entrée), puis « Claude account with subscription », et valide dans le navigateur. Quand c'est fait, tape /exit dans la fenêtre, puis redémarre Jarvis." };
-      }
-      case "voix-locale-installer": {
-        if (localVoice.installed) return { ok: true, message: "La voix locale est déjà installée. Choisis « Voix locale » dans Moteur de voix, enregistre, puis « Écouter un essai »." };
-        host.notify("Voix locale", "Installation en cours : plusieurs Go à télécharger, 10 à 20 minutes. Je te préviens à la fin.");
-        void localVoice.install().then((msg) => {
-          host.notify("Voix locale", msg);
-          reply(msg);
-        });
-        return { ok: true, message: "Installation lancée en arrière-plan (10 à 20 minutes, plusieurs Go). Je te préviens quand c'est fini. Ensuite : Moteur de voix → « Voix locale », Enregistrer, puis « Écouter un essai »." };
-      }
-      case "voix-essai": {
-        const local = env("VOIX_MOTEUR") === "locale";
-        if (local && !localVoice.installed) return { ok: false, message: "La voix locale n'est pas encore installée : clique sur « Installer la voix locale »." };
-        const started = Date.now();
-        say("Bonjour Alex. Il fait huit degrés, ton premier rendez-vous est à neuf heures, et j'ai pris la liberté de lancer le café. Façon de parler.");
-        if (local) {
-          const ok = await localVoice.start();
-          return ok ? { ok: true, message: `Voix locale prête sur ${localVoice.device === "cuda" ? "la carte graphique" : "le processeur (lent)"} (${Math.round((Date.now() - started) / 1000)} s). Tu l'entends ?` } : { ok: false, message: `La voix locale ne démarre pas : ${localVoice.lastError ?? "erreur inconnue"}. Jarvis garde la voix en ligne en attendant.` };
-        }
-        return { ok: true, message: "Essai lancé avec la voix Microsoft en ligne." };
-      }
-      case "ollama": {
-        const models = await localAI.models();
-        return models.length ? { ok: true, message: `Modèles locaux : ${models.map((m) => m.nom).join(", ")}.` } : { ok: false, message: "Ollama répond mais n'a aucun modèle : « ollama pull qwen3:14b »." };
-      }
-      case "sauvegarde": {
-        const r = await backups.run();
-        if (!r) return { ok: true, message: "Une sauvegarde est déjà en cours." };
-        const copy = env("SAUVEGARDE_MOT_DE_PASSE") ? " Tes mots de passe sont copiés, chiffrés, à côté." : " Ajoute un mot de passe de sauvegarde pour copier aussi tes mots de passe et connexions.";
-        return { ok: true, message: `Sauvegarde faite : ${r.fichiers} fichiers dans ${r.fichier}.${copy}` };
-      }
-      case "restaurer-coffre": {
-        const password = env("SAUVEGARDE_MOT_DE_PASSE");
-        if (!password) return { ok: false, message: "Tape d'abord le mot de passe de sauvegarde (le même qu'avant), enregistre, puis recommence." };
-        if (!vault.available) return { ok: false, message: "Le chiffrement de Windows n'est pas disponible : restauration impossible." };
-        const chosen = await dialog.showOpenDialog({ title: "Fichier jarvis-coffre.chiffre", defaultPath: path.join(workspace, "sauvegardes"), filters: [{ name: "Copie des mots de passe", extensions: ["chiffre"] }], properties: ["openFile"] });
-        const file = chosen.filePaths[0];
-        if (chosen.canceled || !file) return { ok: false, message: "Aucun fichier choisi." };
-        const bundle = openSecrets(readFileSync(file), password);
-        for (const [key, value] of Object.entries(bundle.coffre)) vault.set(key, value);
-        const changes = mergeEnvText(parseEnv(readFileSync(envFile, "utf8")), parseEnv(bundle.reglages));
-        writeFileSync(envFile, updateEnvText(readFileSync(envFile, "utf8"), changes));
-        return { ok: true, message: `Restauré : ${Object.keys(bundle.coffre).length} mot(s) de passe et connexions du ${new Date(bundle.date).toLocaleDateString("fr-FR")}. Redémarre Jarvis pour les utiliser.`, redemarrage: true };
-      }
-      case "mise-a-jour":
-        return { ok: true, message: await checkUpdates() };
-    }
-    return { ok: false, message: "Action inconnue." };
-  } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) };
-  }
+// Boutons de la page Réglages (Tester, Connecter…) : voir settings-actions.ts
+function runSettingAction(id: string) {
+  return settingActions.runSettingAction(id);
 }
 
 ipcMain.handle("reglages:lire", () => settings.view());
@@ -2366,3 +2030,66 @@ app.on("will-quit", () => {
 
 // Sans fenêtre visible, Jarvis reste actif dans la zone de notification.
 app.on("window-all-closed", () => undefined);
+
+
+
+
+
+
+
+/** Services partagés avec les modules de Jarvis (chaque module reçoit seulement ceux dont il a besoin). */
+export interface JarvisServices {
+  actions: typeof actions;
+  agenda: typeof agenda;
+  backups: typeof backups;
+  brain: typeof brain;
+  broadcast: typeof broadcast;
+  checkUpdates: typeof checkUpdates;
+  config: typeof config;
+  conversation: typeof conversation;
+  ears: typeof ears;
+  env: typeof env;
+  envFile: typeof envFile;
+  flags: typeof flags;
+  games: typeof games;
+  handleCommand: typeof handleCommand;
+  hardware: typeof hardware;
+  host: typeof host;
+  lab: typeof lab;
+  library: typeof library;
+  localAI: typeof localAI;
+  localVoice: typeof localVoice;
+  micro: typeof micro;
+  movedSecrets: typeof movedSecrets;
+  ownerName: typeof ownerName;
+  pages: typeof pages;
+  perf: typeof perf;
+  phone: typeof phone;
+  planning: typeof planning;
+  race: typeof race;
+  reply: typeof reply;
+  say: typeof say;
+  secretCopyDate: typeof secretCopyDate;
+  security: typeof security;
+  senses: typeof senses;
+  settings: typeof settings;
+  spotify: typeof spotify;
+  spotifyHelpers: typeof spotifyHelpers;
+  tapo: typeof tapo;
+  tapoCache: typeof tapoCache;
+  tuning: typeof tuning;
+  updateStatus: typeof updateStatus;
+  updateTray: typeof updateTray;
+  vault: typeof vault;
+  voice: typeof voice;
+  voiceLock: typeof voiceLock;
+  wake: typeof wake;
+  weather: typeof weather;
+  workspace: typeof workspace;
+}
+
+const diagnostics = createDiagnostics({ localAI, ears, env, localVoice, voice, voiceLock, agenda, tapo, security, phone, spotify, planning, wake, backups, vault, lab, library, micro, perf, secretCopyDate, senses: () => senses, updateStatus: () => updateStatus, gpuPreferenceNote: () => pcCare.gpuNote(), hardware: () => hardware, tuning: () => tuning, movedSecrets: () => movedSecrets });
+
+const settingActions = createSettingActions({ agenda, backups, checkUpdates, conversation, env, envFile, handleCommand, host, localAI, localVoice, phone, planning, reply, say, settings, spotifyHelpers, tapo, tapoCache, vault, wake, weather, workspace });
+
+const pcCare = createPcCare({ actions, brain, broadcast, config, ears, env, flags, games, host, localAI, localVoice, ownerName, pages, perf, race, updateTray, workspace, hardware: () => hardware, tuning: () => tuning });
