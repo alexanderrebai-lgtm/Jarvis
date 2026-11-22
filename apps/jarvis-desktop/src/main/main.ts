@@ -3,6 +3,7 @@ import { cpus, totalmem } from "node:os";
 import path from "node:path";
 import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, Notification, powerSaveBlocker, protocol, safeStorage, screen, shell, Tray } from "electron";
 import ffmpegPath from "ffmpeg-static";
+import { spawn } from "node:child_process";
 import { WebBrowser } from "@muscu/jarvis/src/browser.js";
 import { readConfig } from "@muscu/jarvis/src/config.js";
 import { AgendaService } from "@muscu/jarvis/src/google/agenda.js";
@@ -72,6 +73,7 @@ import { VerifStore, lancerVerifications, phraseVerifications, type CheckDef, ty
 import { SatelliteServer } from "./satellite.js";
 import { avecRelecture, promptRelecteur } from "./relecture.js";
 import { MobileServer, canalAutorise, type Niveau as NiveauMobile } from "./mobile.js";
+import { TelegramInbox } from "./telegram-in.js";
 import { AmeliorationStore, revue as faireRevue } from "./amelioration.js";
 import { createRoutineRunner } from "./routine-runner.js";
 import { createIntentActions } from "./intent-actions.js";
@@ -681,6 +683,46 @@ async function startSatellite(): Promise<void> {
   if (!r.ok) console.warn("[satellite]", r.message);
 }
 
+// ---------- Telegram dans les deux sens ----------
+
+/** Message vocal Telegram (OGG/Opus) → texte, transcrit sur ce PC (ffmpeg décode, Whisper transcrit). */
+async function transcrireVocal(audio: Buffer): Promise<string | undefined> {
+  const bin = (ffmpegPath as unknown as string | null) ?? undefined;
+  if (!bin) return undefined;
+  const pcm = await new Promise<Buffer | undefined>((resolve) => {
+    const child = spawn(bin, ["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-f", "f32le", "-ac", "1", "-ar", "16000", "pipe:1"], { windowsHide: true });
+    const morceaux: Buffer[] = [];
+    const delai = setTimeout(() => child.kill(), 30_000);
+    child.stdout.on("data", (c: Buffer) => morceaux.push(c));
+    child.on("close", () => {
+      clearTimeout(delai);
+      resolve(morceaux.length ? Buffer.concat(morceaux) : undefined);
+    });
+    child.on("error", () => resolve(undefined));
+    child.stdin.on("error", () => undefined);
+    child.stdin.end(audio);
+  });
+  if (!pcm || pcm.length < 3200) return undefined;
+  const octets = pcm.length - (pcm.length % 4);
+  const copie = new Uint8Array(octets);
+  copie.set(pcm.subarray(0, octets));
+  return ears.transcribe(new Float32Array(copie.buffer));
+}
+const telegramInbox = new TelegramInbox({
+  token: () => env("TELEGRAM_BOT_TOKEN"),
+  chatId: () => env("TELEGRAM_CHAT_ID"),
+  actif: () => env("TELEGRAM_RECEPTION") === "true",
+  transcrire: transcrireVocal,
+  repondre: async (texte, origine) => {
+    // Par défaut : questions seulement (un compte Telegram piraté ne doit pas donner la main sur le PC).
+    const agit = env("TELEGRAM_CONFIANCE") === "agir";
+    const r = await brain.ask(mask(texte), {}, { separate: true, source: "Telegram", ...(agit ? {} : { trust: "inconnu" as const }) });
+    const reponse = unmask(r.text);
+    journal.add({ demande: `(Telegram${origine === "vocal" ? ", vocal" : ""}) ${unmask(texte)}`, reponse, outils: ["Telegram"] });
+    return reponse;
+  },
+});
+
 // ---------- Jarvis Mobile (l'application web du téléphone) ----------
 
 /** Tous les canaux de l'interface, pour que le téléphone appelle les mêmes (sous liste blanche, voir mobile.ts). */
@@ -718,6 +760,7 @@ async function refreshMobile(): Promise<void> {
   const cle = JSON.stringify(ecoutes);
   if (cle === mobileEcoutesActuelles && (mobileServer || !ecoutes.length)) return;
   mobileServer?.stop();
+  telegramInbox.stop();
   mobileServer = undefined;
   mobileEcoutesActuelles = cle;
   if (!ecoutes.length) return;
@@ -2176,6 +2219,7 @@ void app.whenReady().then(async () => {
   void startHealth();
   void startSatellite();
   startMobile();
+  telegramInbox.start();
   if (!startupTest) {
     watchdog.start();
     setTimeout(() => void checkLastShutdown().catch((e) => console.warn("[santé]", e)), 2 * 60_000);
@@ -2430,7 +2474,10 @@ const checks: CheckDef[] = [
     lancer: async () => {
       if (!phone.enabled) return vNon("Telegram non configuré.");
       await phone.text("✅ Jarvis : test de bout en bout. Ce message est bien arrivé.");
-      return vOk("Message de test envoyé : vérifie qu'il est arrivé sur ton téléphone.");
+      if (env("TELEGRAM_RECEPTION") === "true" && telegramInbox.etat !== "ok") {
+        return { etat: "attention", detail: `Message envoyé, mais la réception ne tourne pas (${telegramInbox.derniereErreur ?? "démarrage en cours"}).`, conseil: telegramInbox.etat === "conflit" ? "Un autre programme lit le bot : arrête-le (ou utilise un autre bot pour Jarvis)." : "Patiente quelques secondes et relance le test." };
+      }
+      return vOk(`Message de test envoyé : vérifie qu'il est arrivé sur ton téléphone.${env("TELEGRAM_RECEPTION") === "true" ? " Réception active : tu peux lui répondre." : ""}`);
     },
   },
   {

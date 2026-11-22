@@ -116,10 +116,12 @@ export const SETTING_GROUPS: SettingGroup[] = [
   {
     id: "alertes",
     titre: "Alertes sur le téléphone (Telegram)",
-    description: "Jarvis t'envoie sur ton téléphone les alertes de la surveillance (avec photo) et tes briefings. C'est à sens unique : il t'écrit, tu ne lui réponds pas par Telegram. Dans Telegram, écris à @BotFather « /newbot », copie le jeton. Envoie un message à ton bot, puis clique sur « Trouver ma conversation ».",
+    description: "Jarvis t'envoie sur ton téléphone les alertes de la surveillance (avec photo) et tes briefings. Si tu le souhaites, tu peux aussi lui répondre par Telegram (texte ou message vocal). Dans Telegram, écris à @BotFather « /newbot », copie le jeton. Envoie un message à ton bot, puis clique sur « Trouver ma conversation ».",
     champs: [
       { cle: "TELEGRAM_BOT_TOKEN", libelle: "Jeton du bot", type: "secret", redemarrage: true, aide: "Donné par @BotFather, il ressemble à 123456789:AAH…" },
       { cle: "TELEGRAM_CHAT_ID", libelle: "Identifiant de ta conversation", type: "texte", redemarrage: true, aide: "Un nombre, rempli tout seul par « Trouver ma conversation ». Pas le nom du bot." },
+      { cle: "TELEGRAM_RECEPTION", libelle: "Pouvoir lui répondre par Telegram (texte et messages vocaux)", type: "choix", options: [{ valeur: "false", libelle: "Non : il t'écrit seulement (par défaut)" }, { valeur: "true", libelle: "Oui : tu lui écris ou lui envoies un vocal, il répond" }], aide: "Seule ta conversation avec ton bot est écoutée, tout le reste est ignoré. Les vocaux sont transcrits sur ton PC." },
+      { cle: "TELEGRAM_CONFIANCE", libelle: "Ce que Telegram a le droit de faire", type: "choix", options: [{ valeur: "questions", libelle: "Questions seulement (conseillé)" }, { valeur: "agir", libelle: "Agir comme toi (maison, musique, fichiers…)" }], aide: "Telegram n'est pas conçu pour des ordres sensibles : si ton compte était piraté (échange de carte SIM), « agir » donnerait la main sur ton PC. Pour tout piloter, utilise plutôt Jarvis Mobile avec Tailscale." },
       { cle: "SURVEILLANCE_LUMIERES", libelle: "Lampes de dissuasion", type: "texte", exemple: "tout" },
       { cle: "SURVEILLANCE_DISSUASION", libelle: "Dissuasion (lumières et message)", type: "choix", options: [{ valeur: "true", libelle: "Oui" }, { valeur: "false", libelle: "Non" }] },
     ],

@@ -57,12 +57,31 @@ téléphone ? Jarvis revérifie les adresses toute les minutes.
 - Le lien envoyé par Telegram transite par les serveurs de Telegram : ne le
   transfère à personne, et renouvelle le jeton en cas de doute.
 
+## Répondre à Jarvis par Telegram (texte et messages vocaux)
+
+En plus de l'application, tu peux écrire — ou envoyer un **message vocal** — à ton
+bot Telegram : Jarvis répond. Ça marche de n'importe où, **sans Tailscale**.
+
+1. Réglages → **Alertes sur le téléphone (Telegram)** : renseigne le bot comme avant.
+2. Mets « Pouvoir lui répondre par Telegram » sur **Oui**, enregistre.
+3. Écris-lui, ou tiens le micro de Telegram et parle. Les vocaux sont **transcrits
+   sur ton PC** (Whisper) ; Jarvis te dit d'abord ce qu'il a compris.
+
+Sécurité : seule **ta** conversation privée avec le bot est écoutée, tout le reste
+est ignoré. Les vieux messages (Jarvis éteint) ne sont pas exécutés d'un coup.
+Par défaut, Telegram est en **« questions seulement »** : si ton compte était piraté
+(échange de carte SIM), il ne doit pas donner la main sur ton PC. « Agir comme toi »
+est un choix explicite ; pour tout piloter, préfère Jarvis Mobile avec Tailscale.
+
+Un seul programme peut lire un bot à la fois : si le serveur Jarvis (version
+téléphone/serveur) utilise le même bot, Jarvis Windows signale un conflit.
+
 ## Limites actuelles
 
 - Pas de notifications push sur le téléphone (elles demandent HTTPS et une
   installation plus lourde) : les alertes de la surveillance continuent d'arriver
   par **Telegram**.
 - Le PC doit être **allumé** et Jarvis lancé.
-- Pas de voix du téléphone vers Jarvis en continu : dicte avec le clavier.
+- Pas de conversation vocale en continu depuis l'appli : dicte avec le clavier, ou envoie un vocal par Telegram.
 - Je l'ai testé avec un iPhone **émulé** sur un PC de test (appairage, onglets,
   refus de sécurité), pas sur ton vrai téléphone. Dis-moi ce qui coince.
