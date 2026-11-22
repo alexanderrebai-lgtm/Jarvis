@@ -245,7 +245,7 @@ function renderConnectors(): HTMLElement {
         b.disabled = true;
         say("Connexion en cours…");
         const r = await api.invoke<{ ok: boolean; message: string; outils: string[]; connecteurs?: Connector[] }>("connecteurs:tester", b.dataset.test);
-        say(`${r.message}${r.outils.length ? ` (${r.outils.slice(0, 12).join(", ")}${r.outils.length > 12 ? "…" : ""})` : ""}`, r.ok);
+        say(`${b.dataset.test} : ${r.message}${r.outils.length ? ` (${r.outils.slice(0, 12).join(", ")}${r.outils.length > 12 ? "…" : ""})` : ""}`, r.ok);
         if (r.connecteurs) draw(r.connecteurs);
         else b.disabled = false;
       };

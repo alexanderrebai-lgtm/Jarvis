@@ -109,3 +109,13 @@ describe("politique : contenu externe restreint", () => {
     expect(decide("Bash", {}, ctx([])).reason).toContain("contenu externe");
   });
 });
+
+import { testConnector } from "../src/main/connectors.js";
+
+describe("message d'erreur d'un connecteur local", () => {
+  it("dit que rien n'écoute sur ce PC quand le programme n'est pas lancé", async () => {
+    const r = await testConnector({ type: "http", url: "http://127.0.0.1:9/mcp" }, 5000);
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain("installé et lancé");
+  });
+});

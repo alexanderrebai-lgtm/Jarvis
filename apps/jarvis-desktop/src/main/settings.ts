@@ -116,7 +116,7 @@ export const SETTING_GROUPS: SettingGroup[] = [
   {
     id: "alertes",
     titre: "Alertes sur le téléphone (Telegram)",
-    description: "Dans Telegram, écris à @BotFather « /newbot », copie le jeton. Envoie un message à ton bot, puis clique sur « Trouver ma conversation ».",
+    description: "Jarvis t'envoie sur ton téléphone les alertes de la surveillance (avec photo) et tes briefings. C'est à sens unique : il t'écrit, tu ne lui réponds pas par Telegram. Dans Telegram, écris à @BotFather « /newbot », copie le jeton. Envoie un message à ton bot, puis clique sur « Trouver ma conversation ».",
     champs: [
       { cle: "TELEGRAM_BOT_TOKEN", libelle: "Jeton du bot", type: "secret", redemarrage: true, aide: "Donné par @BotFather, il ressemble à 123456789:AAH…" },
       { cle: "TELEGRAM_CHAT_ID", libelle: "Identifiant de ta conversation", type: "texte", redemarrage: true, aide: "Un nombre, rempli tout seul par « Trouver ma conversation ». Pas le nom du bot." },

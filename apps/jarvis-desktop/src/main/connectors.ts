@@ -291,7 +291,9 @@ export async function testConnector(config: McpConfig, timeoutMs = 30_000): Prom
       : /ENOENT|not found|introuvable/i.test(text)
         ? " Le programme est introuvable : est-il installé (Node.js pour npx, Python pour uvx) ?"
         : /ECONNREFUSED|ENOTFOUND|fetch failed/i.test(text)
-          ? " Le serveur ne répond pas à cette adresse."
+          ? config.type === "http" && /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(config.url)
+            ? " Rien n'écoute à cette adresse sur ce PC : le programme (par exemple Screenpipe) est-il installé et lancé ? Si tu n'en as pas besoin, désactive ou supprime ce connecteur."
+            : " Le serveur ne répond pas à cette adresse."
           : "";
     return { ok: false, message: `Échec : ${text.slice(0, 200)}.${hint}`, outils: [] };
   } finally {
