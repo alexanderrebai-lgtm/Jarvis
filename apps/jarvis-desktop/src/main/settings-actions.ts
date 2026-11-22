@@ -162,7 +162,7 @@ export function createSettingActions(d: SettingActionsDeps) {
         case "sante-adresse": {
           const c = healthConnexion();
           if (!c.active) return { ok: false, message: "La réception est désactivée : mets « Oui » à « Recevoir mes données de santé », enregistre, puis redémarre Jarvis." };
-          return { ok: true, message: `Dans l'appli du téléphone, envoie (POST JSON) vers ${c.url} avec l'en-tête x-jeton: ${c.jeton}.${c.urlDistante ? ` De n'importe où (Tailscale) : ${c.urlDistante}.` : ""} Même Wi-Fi requis sans Tailscale.` };
+          return { ok: true, message: `Jarvis a ouvert une « boîte aux lettres » sur ton PC. Adresse : ${c.url} — Code (à mettre dans l'en-tête « x-jeton ») : ${c.jeton}. Une appli du téléphone doit y déposer les données de ta montre : le guide pas à pas est sur la page « Ma forme ». Le téléphone doit être sur le même Wi-Fi que le PC.${c.urlDistante ? ` Hors de la maison (Tailscale) : ${c.urlDistante}.` : ""}` };
         }
         case "satellite-adresse": {
           const c = satelliteConnexion();

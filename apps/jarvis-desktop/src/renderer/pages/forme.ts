@@ -34,7 +34,7 @@ export function renderForme(root: HTMLElement): void {
          ${c.urlDistante ? `<p class="lead"><b>Depuis n'importe où</b> (Tailscale détecté) :</p><div class="forme-url"><code>${esc(c.urlDistante)}</code></div>` : `<p class="tip">Pour que ça marche aussi hors de la maison (4G, travail), installe <b>Tailscale</b> sur le PC et le téléphone : Jarvis affichera ici une adresse joignable de partout, sans ouvrir de port sur ta box.</p>`}
          <p class="lead">En-tête : <code>x-jeton: ${esc(c.jeton)}</code> (ou ajoute <code>?jeton=${esc(c.jeton)}</code> à l'adresse).</p>
          <p class="lead"><b>iPhone / Apple Santé</b> : appli « Health Auto Export » → automatisation « REST API », méthode POST, cette adresse.</p>
-         <p class="lead"><b>Android / Huawei Watch 2</b> : les données passent par Health Connect (via l'appli Huawei Santé + un pont comme « Health Sync »), puis une appli qui envoie par webhook (ex. « Life Dashboard ») vers cette adresse.</p>
+         <p class="lead"><b>Android</b> : installe l'appli « Health Connect Webhook » (Play Store). Autorise-la à lire tes données dans Health Connect, ajoute un webhook avec l'adresse ci-dessus et un en-tête personnalisé <code>x-jeton</code> = le code. Il faut que ta montre envoie déjà ses données à Health Connect (selon la montre, ça passe par son appli).</p>
          <p class="tip">Le PC et le téléphone doivent être sur le même Wi-Fi. Si rien n'arrive, autorise Jarvis sur le réseau privé dans le pare-feu de Windows.</p>`
       : `<p class="lead">La réception est désactivée. Va dans <b>Réglages → Santé (montre connectée)</b>, mets « Oui », puis redémarre Jarvis. L'adresse et le code à mettre dans l'appli apparaîtront ici.</p>`;
   };

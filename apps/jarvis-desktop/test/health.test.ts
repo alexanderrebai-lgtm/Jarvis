@@ -53,3 +53,40 @@ describe("santé : serveur", () => {
     server.stop();
   });
 });
+
+describe("santé : applis Android (Health Connect Webhook)", () => {
+  const lot = {
+    timestamp: "2026-11-23T08:00:00Z",
+    app_version: "1.0.0",
+    timezone: "Europe/Paris",
+    steps: [{ count: 3200, start_time: "2026-11-23T06:00:00Z", end_time: "2026-11-23T08:00:00Z" }],
+    heart_rate: [{ bpm: 70, time: "2026-11-23T07:00:00Z" }, { bpm: 72, time: "2026-11-23T08:15:00Z" }],
+    sleep: [{ session_end_time: "2026-11-23T06:30:00Z", duration_seconds: 27000, stages: [] }],
+    active_calories: [{ calories: 120, start_time: "2026-11-23T06:00:00Z", end_time: "2026-11-23T08:00:00Z" }],
+    oxygen_saturation: [{ percentage: 97, time: "2026-11-23T07:30:00Z" }],
+    weight: [{ kilograms: 78.4, time: "2026-11-23T06:45:00Z" }],
+    distance: [{ meters: 2500, start_time: "2026-11-23T06:00:00Z", end_time: "2026-11-23T08:00:00Z" }],
+  };
+
+  it("lit les listes par type de mesure", () => {
+    const s = parsePayload(lot);
+    const v = (t: string) => s.filter((x) => x.type === t).map((x) => x.valeur);
+    expect(v("pas")).toEqual([3200]);
+    expect(v("rythme")).toEqual([70, 72]);
+    expect(v("sommeil")).toEqual([7.5]);
+    expect(v("calories")).toEqual([120]);
+    expect(v("spo2")).toEqual([97]);
+    expect(v("poids")).toEqual([78.4]);
+    expect(v("distance")).toEqual([2.5]);
+  });
+
+  it("ne double pas les pas quand l'appli renvoie le même lot", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "hc-"));
+    const store = new HealthStore(dir);
+    expect(store.ingest(parsePayload(lot))).toBeGreaterThan(0);
+    expect(store.ingest(parsePayload(lot))).toBe(0);
+    const resume = store.summary(() => new Date("2026-11-23T12:00:00Z"));
+    expect(resume.find((x) => x.type === "pas")?.valeur).toBe(3200);
+    expect(resume.find((x) => x.type === "rythme")?.valeur).toBe(72);
+  });
+});

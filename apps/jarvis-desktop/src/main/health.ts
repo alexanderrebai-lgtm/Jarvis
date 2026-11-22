@@ -98,8 +98,45 @@ export function parsePayload(body: unknown, now = () => new Date()): Sample[] {
     for (const m of body as Array<Record<string, unknown>>) push(String(m.type ?? m.name ?? ""), num(m.valeur ?? m.value ?? m.qty), m.unite ? String(m.unite) : undefined, m.instant ? String(m.instant) : undefined);
     return out;
   }
-  if (b && typeof b === "object") for (const [k, v] of Object.entries(b)) push(k, num(v));
+  if (b && typeof b === "object") {
+    if (parseHealthConnect(b, out)) return out;
+    for (const [k, v] of Object.entries(b)) push(k, num(v));
+  }
   return out;
+}
+
+const iso = (v: unknown): string | undefined => {
+  const t = typeof v === "string" ? Date.parse(v) : NaN;
+  return Number.isFinite(t) ? new Date(t).toISOString() : undefined;
+};
+
+/**
+ * Format des applis Android qui lisent Health Connect et envoient un webhook (ex. « Health Connect Webhook ») :
+ * un objet avec une liste par type de mesure (steps, heart_rate, sleep, active_calories, oxygen_saturation,
+ * weight, distance), chaque élément ayant son heure (time, end_time ou session_end_time).
+ */
+function parseHealthConnect(b: Record<string, unknown>, out: Sample[]): boolean {
+  const liste = (k: string): Array<Record<string, unknown>> => (Array.isArray(b[k]) ? (b[k] as Array<Record<string, unknown>>).filter((x) => x && typeof x === "object") : []);
+  const cles = ["steps", "heart_rate", "sleep", "active_calories", "oxygen_saturation", "weight", "distance"];
+  if (!cles.some((k) => Array.isArray(b[k]))) return false;
+  const when = (r: Record<string, unknown>) => iso(r.end_time ?? r.time ?? r.session_end_time ?? r.start_time) ?? new Date().toISOString();
+  const add = (type: MetricType, valeur: number | undefined, instant: string, unite?: string) => {
+    if (valeur !== undefined) out.push({ type, valeur, ...(unite ? { unite } : {}), instant });
+  };
+  for (const r of liste("steps")) add("pas", num(r.count), when(r));
+  for (const r of liste("heart_rate").slice(-50)) add("rythme", num(r.bpm ?? r.avg), when(r), "bpm");
+  for (const r of liste("sleep")) {
+    const s = num(r.duration_seconds);
+    add("sommeil", s !== undefined ? Math.round((s / 3600) * 10) / 10 : undefined, when(r), "h");
+  }
+  for (const r of liste("active_calories")) add("calories", num(r.calories), when(r), "kcal");
+  for (const r of liste("oxygen_saturation").slice(-20)) add("spo2", num(r.percentage ?? r.avg), when(r), "%");
+  for (const r of liste("weight")) add("poids", num(r.kilograms), when(r), "kg");
+  for (const r of liste("distance")) {
+    const m = num(r.meters);
+    add("distance", m !== undefined ? Math.round((m / 1000) * 100) / 100 : undefined, when(r), "km");
+  }
+  return true;
 }
 
 function isoDay(iso: string): string {
@@ -115,8 +152,20 @@ export class HealthStore {
 
   ingest(samples: Sample[]): number {
     if (!samples.length) return 0;
-    this.store.update((all) => [...all, ...samples].slice(-this.max));
-    return samples.length;
+    let ajoutes = 0;
+    this.store.update((all) => {
+      // Une appli qui renvoie le même lot après un échec ne doit pas doubler les pas du jour.
+      const vus = new Set(all.map((s) => `${s.type}|${s.instant}|${s.valeur}`));
+      const nouveaux = samples.filter((s) => {
+        const k = `${s.type}|${s.instant}|${s.valeur}`;
+        if (vus.has(k)) return false;
+        vus.add(k);
+        return true;
+      });
+      ajoutes = nouveaux.length;
+      return [...all, ...nouveaux].slice(-this.max);
+    });
+    return ajoutes;
   }
 
   all(): Sample[] {
