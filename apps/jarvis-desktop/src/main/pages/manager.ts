@@ -31,6 +31,9 @@ export class PageManager {
   private visible: Placement[] = [];
   private game = false;
   private lastFocused: PageId | undefined;
+  /** Une page fermée reste prête (réouverture instantanée) pendant ce délai, puis sa mémoire est libérée. */
+  hiddenTtlMs = 5 * 60_000;
+  private readonly releaseTimers = new Map<PageId, NodeJS.Timeout>();
 
   constructor(private readonly options: PageManagerOptions) {
     this.remembered = new JsonStore(options.dataDir, "ecrans", () => ({}));
@@ -192,12 +195,34 @@ export class PageManager {
     if (id !== "accueil" && win?.isVisible()) {
       win.hide();
       this.options.onClose?.(id);
+      this.scheduleRelease(id);
     }
+  }
+
+  private scheduleRelease(id: PageId): void {
+    if (id === "accueil") return;
+    clearTimeout(this.releaseTimers.get(id));
+    const timer = setTimeout(() => this.release(id), this.hiddenTtlMs);
+    timer.unref?.();
+    this.releaseTimers.set(id, timer);
+  }
+
+  private release(id: PageId): void {
+    this.releaseTimers.delete(id);
+    const win = this.window(id);
+    if (win && !win.isVisible()) win.destroy();
+  }
+
+  /** Libère tout de suite la mémoire des pages fermées (pendant un jeu). */
+  releaseHidden(): void {
+    for (const [id, win] of this.windows) if (id !== "accueil" && !win.isDestroyed() && !win.isVisible()) this.release(id);
   }
 
   private reveal(id: PageId, focus: boolean): void {
     const win = this.window(id);
     if (!win) return;
+    clearTimeout(this.releaseTimers.get(id));
+    this.releaseTimers.delete(id);
     const wasVisible = win.isVisible();
     // Pendant une partie, Jarvis ne passe jamais devant le jeu au clavier.
     if (focus && !this.game) {

@@ -274,14 +274,27 @@ export class Library {
 }
 
 /** Modèle multilingue E5 (français compris), exécuté sur le PC. */
-export function e5Embedder(options: { cacheDir: string; model?: string }): Embedder {
+export function e5Embedder(options: { cacheDir: string; model?: string; threads?: number; idleMs?: number }): Embedder {
   const model = options.model ?? "Xenova/multilingual-e5-small";
   let pipe: Promise<(texts: string[], o: Record<string, unknown>) => Promise<{ tolist: () => number[][] }>> | undefined;
+  // Le modèle ne sert qu'aux recherches et aux scans : libéré après quelques minutes sans usage.
+  let idle: NodeJS.Timeout | undefined;
+  const release = () => {
+    const current = pipe;
+    pipe = undefined;
+    void current?.then((p) => (p as unknown as { dispose?: () => Promise<void> }).dispose?.()).catch(() => undefined);
+  };
+  const touch = () => {
+    if (idle) clearTimeout(idle);
+    idle = setTimeout(release, options.idleMs ?? 5 * 60_000);
+    idle.unref?.();
+  };
   const load = () => {
+    touch();
     pipe ??= (async () => {
       const t = (await import("@huggingface/transformers")) as unknown as { env: { cacheDir: string }; pipeline: (task: string, model: string, o?: unknown) => Promise<(texts: string[], o: Record<string, unknown>) => Promise<{ tolist: () => number[][] }>> };
       t.env.cacheDir = options.cacheDir;
-      return t.pipeline("feature-extraction", model, { dtype: "q8", device: "cpu" });
+      return t.pipeline("feature-extraction", model, { dtype: "q8", device: "cpu", ...(options.threads ? { session_options: { intraOpNumThreads: options.threads } } : {}) });
     })();
     pipe.catch(() => (pipe = undefined));
     return pipe;

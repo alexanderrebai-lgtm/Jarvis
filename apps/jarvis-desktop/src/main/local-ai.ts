@@ -37,7 +37,8 @@ export const BENCH_PROMPTS = [
 export class LocalAI {
   private readonly fetchFn: Fetch;
 
-  constructor(private readonly options: { url?: string; model?: string | undefined; fetchFn?: Fetch } = {}) {
+  /** vramGo : mémoire de la carte graphique ; un modèle qui n'y tient pas déborde sur le processeur (très lent). */
+  constructor(private readonly options: { url?: string; model?: string | undefined; fetchFn?: Fetch; vramGo?: () => number } = {}) {
     this.fetchFn = options.fetchFn ?? fetch;
   }
 
@@ -58,6 +59,16 @@ export class LocalAI {
     }));
   }
 
+  /** Décharge les modèles de la carte graphique (pendant un jeu). Ollama les recharge à la prochaine question. */
+  async unloadAll(): Promise<number> {
+    const res = await this.fetchFn(`${this.url}/api/ps`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return 0;
+    const data = (await res.json()) as { models?: Array<{ name: string }> };
+    const loaded = data.models ?? [];
+    await Promise.all(loaded.map((m) => this.fetchFn(`${this.url}/api/generate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: m.name, keep_alive: 0 }), signal: AbortSignal.timeout(10_000) }).catch(() => undefined)));
+    return loaded.length;
+  }
+
   async available(): Promise<boolean> {
     return this.models()
       .then((m) => m.length > 0)
@@ -70,9 +81,14 @@ export class LocalAI {
     if (!models.length) return undefined;
     if (this.options.model && models.some((m) => m.nom === this.options.model || m.nom.startsWith(`${this.options.model}:`))) return models.find((m) => m.nom === this.options.model || m.nom.startsWith(`${this.options.model}:`))!.nom;
     const preferred = ["qwen3", "mistral-small", "gemma3", "llama3.3", "llama3.1", "qwen2.5", "mistral"];
-    for (const p of preferred) {
-      const found = models.find((m) => m.nom.startsWith(p) && !/embed/.test(m.nom));
-      if (found) return found.nom;
+    // D'abord les modèles qui tiennent entièrement dans la carte graphique (avec un peu de marge), le plus gros d'abord.
+    const vram = this.options.vramGo?.() ?? 0;
+    const fitting = vram > 0 ? models.filter((m) => m.tailleGo > 0 && m.tailleGo <= vram * 0.85).sort((a, b) => b.tailleGo - a.tailleGo) : models;
+    for (const pool of [fitting, models]) {
+      for (const p of preferred) {
+        const found = pool.find((m) => m.nom.startsWith(p) && !/embed/.test(m.nom));
+        if (found) return found.nom;
+      }
     }
     return [...models].filter((m) => !/embed/.test(m.nom)).sort((a, b) => b.tailleGo - a.tailleGo)[0]?.nom;
   }

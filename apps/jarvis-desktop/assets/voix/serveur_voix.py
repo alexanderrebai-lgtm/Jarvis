@@ -49,6 +49,12 @@ except ImportError:  # selon la version du paquet
     from chatterbox import ChatterboxMultilingualTTS
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+# Processeur : quelques cœurs suffisent (le calcul lourd est sur la carte graphique).
+torch.set_num_threads(max(1, int(os.environ.get("JARVIS_THREADS", "4"))))
+if device == "cuda":
+    # Cartes RTX (Ampere et plus) : calculs TF32, plus rapides pour une qualité identique à l'oreille.
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 model = ChatterboxMultilingualTTS.from_pretrained(device=device)
 lock = threading.Lock()
 print(json.dumps({"pret": True, "appareil": device}), flush=True)

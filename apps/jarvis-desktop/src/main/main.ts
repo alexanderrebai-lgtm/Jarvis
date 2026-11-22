@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { constants as osConstants, setPriority } from "node:os";
+import { constants as osConstants, cpus, setPriority, totalmem } from "node:os";
 import path from "node:path";
 import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, Notification, powerSaveBlocker, protocol, safeStorage, screen, shell, Tray } from "electron";
 import ffmpegPath from "ffmpeg-static";
@@ -67,6 +67,7 @@ import { BackgroundTasks } from "./tasks.js";
 import { explainGoogle, findTelegramChat, googleSignIn, parseEnv, SettingsStore, updateEnvText } from "./settings.js";
 import { openSecrets, sealSecrets, mergeEnvText } from "./secret-backup.js";
 import { describeLost, Watchdog } from "./watchdog.js";
+import { buildProfile, describeProfile, tune } from "./hardware.js";
 import { resilientFetch } from "./net-fetch.js";
 import { dpapiCipher, isLegacyVault, migrateEnvSecrets, migrateLegacyVault, Vault } from "./vault.js";
 import { Veille } from "./veille.js";
@@ -142,6 +143,9 @@ try {
 }
 
 const config = readConfig();
+// Profil matériel : estimé tout de suite (cœurs, mémoire), précisé au démarrage avec les cartes graphiques.
+let hardware = buildProfile({ cores: cpus().length }, totalmem(), []);
+let tuning = tune(hardware);
 const env = (name: string) => process.env[name]?.trim() || undefined;
 const ownerName = env("OWNER_NAME") ?? "Alex";
 const workspace = env("JARVIS_WORKSPACE") ?? path.join(app.getPath("documents"), "Jarvis");
@@ -548,6 +552,24 @@ const games = new GameWatcher({
   },
 });
 
+// ---------- Puce graphique de l'interface ----------
+
+let gpuPreferenceNote = "";
+/**
+ * Avec un processeur à puce graphique intégrée (Ryzen « G »), l'affichage de Jarvis peut tourner sur cette puce :
+ * la carte NVIDIA reste entière pour les jeux et l'IA. Réglage Windows « préférence graphique » de Jarvis.exe,
+ * appliqué au prochain démarrage de Jarvis.
+ */
+async function applyGpuPreference(): Promise<void> {
+  if (process.platform !== "win32" || !app.isPackaged) return;
+  const choice = env("GPU_INTERFACE") ?? "auto";
+  const key = "HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences";
+  const value = choice === "integree" || (choice === "auto" && hardware.integre) ? "GpuPreference=1;" : choice === "nvidia" ? "GpuPreference=2;" : undefined;
+  const args = value ? ["add", key, "/v", process.execPath, "/t", "REG_SZ", "/d", value, "/f"] : ["delete", key, "/v", process.execPath, "/f"];
+  await new Promise<void>((resolve) => execFile("reg", args, { windowsHide: true, timeout: 10_000 }, () => resolve()));
+  gpuPreferenceNote = value === "GpuPreference=1;" ? `interface sur la puce intégrée (${hardware.integre?.modele ?? "processeur"})` : value ? "interface sur la carte NVIDIA" : "choix laissé à Windows";
+}
+
 // ---------- Mode jeu : la carte graphique et le processeur reviennent au jeu ----------
 
 /** Choix manuel (menu de l'icône) ; undefined = automatique selon les jeux détectés. */
@@ -563,7 +585,12 @@ async function applyGameMode(on: boolean): Promise<void> {
   broadcast("jarvis:flags", flags);
   updateTray();
   // Voix locale (plusieurs Go sur la carte graphique) : arrêtée, la voix en ligne prend le relais.
-  if (on) localVoice.stop();
+  // IA locale (Ollama) : modèles déchargés de la carte graphique. Pages fermées : mémoire libérée.
+  if (on) {
+    localVoice.stop();
+    void localAI.unloadAll().catch(() => undefined);
+    pages.releaseHidden();
+  }
   // Reconnaissance vocale : petit modèle sur le processeur pendant le jeu.
   ears.setLight(on);
   // Mesures du PC plus espacées.
@@ -590,11 +617,11 @@ function setLowPriority(low: boolean): void {
 
 const learning = new Learning(config.dataDir, workspace);
 const literature = new Literature({ openAlexKey: env("OPENALEX_CLE"), semanticScholarKey: env("SEMANTIC_SCHOLAR_CLE"), ncbiKey: env("NCBI_CLE") });
-const library = new Library({ dataDir: config.dataDir, folder: env("BIBLIOTHEQUE_DOSSIER") ?? path.join(workspace, "bibliotheque"), embedder: env("BIBLIOTHEQUE_SEMANTIQUE") === "false" ? undefined : e5Embedder({ cacheDir: modelCache }) });
+const library = new Library({ dataDir: config.dataDir, folder: env("BIBLIOTHEQUE_DOSSIER") ?? path.join(workspace, "bibliotheque"), embedder: env("BIBLIOTHEQUE_SEMANTIQUE") === "false" ? undefined : e5Embedder({ cacheDir: modelCache, threads: tuning.threadsNormal }) });
 const lab = new Lab(workspace, assets);
 const garage = new Garage(config.dataDir);
 const budget = new Budget(config.dataDir);
-const localAI = new LocalAI({ url: env("OLLAMA_URL"), model: env("IA_LOCALE_MODELE") });
+const localAI = new LocalAI({ url: env("OLLAMA_URL"), model: env("IA_LOCALE_MODELE"), vramGo: () => (hardware.nvidia?.vramMo ?? 0) / 1024 });
 const micro = new Microcontrollers(env("ARDUINO_CLI"));
 const procedures = new Procedures(workspace, async () => {
   const shots = await captureScreens();
@@ -627,14 +654,14 @@ const brain = new Brain({
   },
 });
 const voice = new Voice(env("JARVIS_VOICE") ?? DEFAULT_VOICE, env("JARVIS_VOICE_RATE") ?? "+0%", env("JARVIS_VOICE_PITCH") ?? "+0Hz");
-const localVoice = new LocalVoice(workspace, { assetsDir: assets, findPython: () => lab.findPython() });
+const localVoice = new LocalVoice(workspace, { assetsDir: assets, findPython: () => lab.findPython(), threads: () => tuning.threadsVoix });
 voice.local = {
   active: () => env("VOIX_MOTEUR") === "locale" && localVoice.installed && !flags.jeu,
   synthesize: (text) => localVoice.synthesize(text, { reference: env("VOIX_REFERENCE"), expressivite: Number((env("VOIX_EXPRESSIVITE") ?? "0.5").replace(",", ".")) || 0.5 }),
 };
 const sttSetting = env("STT_MODEL") ?? "auto";
-const ears = new Ears({ cacheDir: modelCache, model: sttSetting === "auto" ? "onnx-community/whisper-small" : sttSetting, device: env("STT_DEVICE") ?? "dml" });
-const voiceLock = new VoiceLock(config.dataDir, wavlmEmbedder({ cacheDir: modelCache }), "Xenova/wavlm-base-plus-sv", Number(env("VOIX_SEUIL") ?? 0.86));
+const ears = new Ears({ cacheDir: modelCache, model: sttSetting === "auto" ? "onnx-community/whisper-small" : sttSetting, device: env("STT_DEVICE") ?? "dml", threads: (light) => (light ? tuning.threadsJeu : tuning.threadsNormal) });
+const voiceLock = new VoiceLock(config.dataDir, wavlmEmbedder({ cacheDir: modelCache, threads: Math.min(4, tuning.threadsNormal) }), "Xenova/wavlm-base-plus-sv", Number(env("VOIX_SEUIL") ?? 0.86));
 // Durée pendant laquelle Jarvis écoute la suite sans son nom (réglage modifiable sans redémarrer).
 const conversation = new ConversationWindow(() => {
   const seconds = Number((env("CONVERSATION_SECONDS") ?? "20").replace(",", "."));
@@ -1270,8 +1297,12 @@ async function runDiagnostic() {
     } },
     { id: "ia-locale", groupe: "Cerveau", titre: "IA locale (secours)", run: async () => {
       const models = await localAI.models().catch(() => undefined);
-      return models?.length ? { etat: "ok", detail: `${models.length} modèle(s) : ${models.slice(0, 4).map((m) => m.nom).join(", ")}` } : { etat: "absent", detail: "Ollama n'est pas installé ou n'a pas de modèle.", conseil: "Installe Ollama (ollama.com), puis « ollama pull qwen3:14b » : Jarvis répondra même sans Internet." };
+      if (!models?.length) return { etat: "absent", detail: "Ollama n'est pas installé ou n'a pas de modèle.", conseil: `Installe Ollama (ollama.com), puis « ollama pull ${tuning.ollamaConseille} » (taille adaptée à ta carte graphique) : Jarvis répondra même sans Internet.` };
+      const vram = (hardware.nvidia?.vramMo ?? 0) / 1024;
+      const tooBig = vram ? models.filter((m) => m.tailleGo > vram * 0.85 && !/embed/.test(m.nom)) : [];
+      return { etat: tooBig.length === models.length ? "attention" : "ok", detail: `${models.length} modèle(s) : ${models.slice(0, 4).map((m) => m.nom).join(", ")}.${tooBig.length ? ` Trop gros pour ta carte graphique (lents) : ${tooBig.map((m) => m.nom).join(", ")}.` : ""}`, ...(tooBig.length === models.length ? { conseil: `Prends « ollama pull ${tuning.ollamaConseille} » : il tient entièrement dans la carte graphique.` } : {}) };
     } },
+    { id: "materiel", groupe: "PC", titre: "Profil matériel", run: () => ({ etat: "ok", detail: `${describeProfile(hardware, tuning)}${gpuPreferenceNote ? ` · ${gpuPreferenceNote}` : ""}.` }) },
     { id: "oreilles", groupe: "Voix", titre: "Reconnaissance vocale", run: () => (ears.loadError ? { etat: "erreur", detail: ears.loadError, conseil: "Vérifie la connexion (le modèle se télécharge au premier lancement)." } : { etat: ears.activeDevice ? "ok" : "attention", detail: `${ears.model} sur ${ears.activeDevice === "dml" ? "la carte graphique" : ears.activeDevice === "cpu" ? "le processeur" : "chargement…"}` }) },
     { id: "voix", groupe: "Voix", titre: "Voix de Jarvis", run: () => {
       if (env("VOIX_MOTEUR") === "locale") {
@@ -1829,10 +1860,14 @@ app.on("before-quit", () => (quitting = true));
 
 /** Modèle de reconnaissance vocale selon la carte graphique (STT_MODEL=auto). */
 async function chooseSpeechModel(): Promise<void> {
-  if (sttSetting !== "auto") return;
   try {
     const si = await import("systeminformation");
-    const graphics = await si.graphics();
+    const [graphics, cpu] = await Promise.all([si.graphics(), si.cpu()]);
+    hardware = buildProfile(cpu, totalmem(), graphics.controllers);
+    tuning = tune(hardware);
+    pages.hiddenTtlMs = tuning.pagesCacheesMs;
+    void applyGpuPreference();
+    if (sttSetting !== "auto") return;
     const vram = Math.max(0, ...graphics.controllers.map((c) => c.vram ?? 0));
     const choice = pickSpeechModel(vram || undefined);
     ears.configure(choice.model, env("STT_DEVICE") ?? choice.device);
@@ -1902,6 +1937,7 @@ function applySettings(keys: string[]): void {
   if (keys.includes("JARVIS_VILLE")) void weather.setCity(env("JARVIS_VILLE"));
   if (keys.includes("VOIX_MOTEUR") && env("VOIX_MOTEUR") === "locale" && localVoice.installed && !flags.jeu) void localVoice.start();
   if (keys.includes("MODE_JEU")) updateGameMode();
+  if (keys.includes("GPU_INTERFACE")) void applyGpuPreference();
   if (keys.includes("VOIX_SEUIL") && env("VOIX_SEUIL")) voiceLock.setThreshold(Number(env("VOIX_SEUIL")!.replace(",", ".")));
   if (keys.some((k) => k.startsWith("REVEIL") || k.startsWith("PLANNING"))) void wake?.refresh();
 }

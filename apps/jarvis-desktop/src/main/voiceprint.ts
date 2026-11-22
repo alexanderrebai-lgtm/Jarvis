@@ -116,7 +116,7 @@ export class VoiceLock {
 }
 
 /** Empreinte vocale par WavLM (transformers.js, sur le PC). */
-export function wavlmEmbedder(options: { cacheDir: string; model?: string; device?: string }): SpeakerEmbedder {
+export function wavlmEmbedder(options: { cacheDir: string; model?: string; device?: string; threads?: number }): SpeakerEmbedder {
   const modelId = options.model ?? "Xenova/wavlm-base-plus-sv";
   let loaded: Promise<{ processor: (audio: Float32Array) => Promise<unknown>; model: (inputs: unknown) => Promise<{ embeddings: { data: Float32Array } }> }> | undefined;
   const load = () => {
@@ -128,7 +128,7 @@ export function wavlmEmbedder(options: { cacheDir: string; model?: string; devic
       };
       transformers.env.cacheDir = options.cacheDir;
       const processor = await transformers.AutoProcessor.from_pretrained(modelId);
-      const model = await transformers.WavLMForXVector.from_pretrained(modelId, { dtype: "fp32", device: "cpu" });
+      const model = await transformers.WavLMForXVector.from_pretrained(modelId, { dtype: "fp32", device: "cpu", ...(options.threads ? { session_options: { intraOpNumThreads: options.threads } } : {}) });
       return { processor, model };
     })();
     loaded.catch(() => (loaded = undefined));

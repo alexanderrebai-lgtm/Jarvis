@@ -155,7 +155,8 @@ export class Ears {
   activeDevice: string | undefined;
   loadError: string | undefined;
 
-  constructor(private readonly options: { cacheDir: string; model: string; device: string }) {}
+  /** threads : cœurs du processeur à utiliser (relu à chaque chargement : moins pendant un jeu). */
+  constructor(private readonly options: { cacheDir: string; model: string; device: string; threads?: (light: boolean) => number }) {}
 
   get model(): string {
     return this.options.model;
@@ -209,7 +210,11 @@ export class Ears {
         const { pipeline, env } = await import("@huggingface/transformers");
         env.cacheDir = this.options.cacheDir;
         const create = (device: string) =>
-          pipeline("automatic-speech-recognition", this.options.model, { device: device as "cpu", dtype: "q8" }) as unknown as Promise<Transcriber>;
+          pipeline("automatic-speech-recognition", this.options.model, {
+            device: device as "cpu",
+            dtype: "q8",
+            ...(this.options.threads ? { session_options: { intraOpNumThreads: this.options.threads(this.lightMode) } } : {}),
+          }) as unknown as Promise<Transcriber>;
         try {
           const t = await create(this.options.device);
           this.activeDevice = this.options.device;

@@ -271,6 +271,16 @@ Dès qu'un jeu est détecté (ou sur « Jarvis, mode jeu », ou par le menu de l
 
 À la sortie du jeu, tout reprend. Hors jeu, la voix locale se décharge seule après 20 minutes sans parler et se recharge en arrière-plan (la première phrase part alors en voix en ligne). Réglages → Toi et ta ville : désactiver le mode jeu automatique, ajouter d'autres jeux.
 
+## Adapté au PC
+
+Au démarrage, Jarvis lit le matériel (page Diagnostic → Profil matériel) et se règle :
+- calculs au processeur (reconnaissance vocale, empreinte vocale, bibliothèque) sur la moitié des cœurs physiques, 2 pendant un jeu ;
+- IA locale : il choisit un modèle Ollama qui tient entièrement dans la carte graphique (qwen3:8b pour 8 Go) et le décharge pendant les jeux ;
+- voix locale : quelques cœurs seulement, calculs TF32 sur les cartes RTX ;
+- pages fermées : mémoire libérée après 5 minutes (16 Go de mémoire ou moins), tout de suite en mode jeu ;
+- modèle de la bibliothèque libéré après 5 minutes sans recherche ;
+- processeur à puce graphique intégrée (Ryzen « G ») : l'interface de Jarvis peut tourner dessus, la carte NVIDIA reste aux jeux et à l'IA (Réglages → Toi et ta ville ; la puce doit être activée dans le BIOS).
+
 ## Mot d'éveil, mode absent et journal
 
 - **Son nom** : Jarvis n'agit que si une phrase contient « Jarvis » (ou juste après une réponse). Ce qui ne lui est pas adressé n'est ni affiché ni gardé. Réglages → Voix et oreilles : autres noms, durée d'écoute de la suite (0 = toujours dire son nom), petit son quand il t'entend.

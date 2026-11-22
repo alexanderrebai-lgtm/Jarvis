@@ -24,7 +24,7 @@ export class LocalVoice {
 
   constructor(
     workspace: string,
-    private readonly options: { assetsDir: string; findPython: () => Promise<string | undefined>; port?: number; fetchFn?: typeof fetch; idleMs?: number },
+    private readonly options: { assetsDir: string; findPython: () => Promise<string | undefined>; port?: number; fetchFn?: typeof fetch; idleMs?: number; threads?: () => number },
   ) {
     this.dir = path.join(workspace, "voix");
     mkdirSync(this.dir, { recursive: true });
@@ -103,7 +103,7 @@ export class LocalVoice {
       }
       const child = spawn(this.python, [script, "--port", String(this.port), "--jeton", this.token], {
         cwd: this.dir,
-        env: { ...process.env, HF_HOME: path.join(this.dir, "modeles"), PYTHONIOENCODING: "utf-8" },
+        env: { ...process.env, HF_HOME: path.join(this.dir, "modeles"), PYTHONIOENCODING: "utf-8", JARVIS_THREADS: String(this.options.threads?.() ?? 4) },
         windowsHide: true,
       });
       this.server = child;
