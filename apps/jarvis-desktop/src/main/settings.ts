@@ -189,6 +189,18 @@ export const SETTING_GROUPS: SettingGroup[] = [
     ],
   },
   {
+    id: "voiture-suivi",
+    titre: "Voiture (traceur GPS)",
+    description: "Pour suivre une voiture sans services connectés d'usine (ex. Peugeot 107) : un traceur GPS OBD envoie sa position à un serveur Traccar (gratuit, chez toi), et Jarvis le lit. Dis « où est la voiture ? », « elle a bougé ? ». Rien ne passe par un cloud qu'on ne maîtrise pas.",
+    champs: [
+      { cle: "VOITURE_TRACCAR_URL", libelle: "Adresse du serveur Traccar", type: "texte", exemple: "http://192.168.1.50:8082", redemarrage: true, aide: "Traccar est un serveur open-source qui reçoit la position du traceur OBD. Installe-le sur le PC ou le même petit ordinateur que Home Assistant." },
+      { cle: "VOITURE_TRACCAR_TOKEN", libelle: "Jeton d'API Traccar", type: "secret", redemarrage: true, aide: "Dans Traccar : Paramètres → Compte → Jeton. Sinon, remplis l'e-mail et le mot de passe ci-dessous." },
+      { cle: "VOITURE_TRACCAR_EMAIL", libelle: "E-mail Traccar (si pas de jeton)", type: "texte", redemarrage: true },
+      { cle: "VOITURE_TRACCAR_MDP", libelle: "Mot de passe Traccar (si pas de jeton)", type: "secret", redemarrage: true },
+      { cle: "VOITURE_TRACCAR_APPAREIL", libelle: "Nom du traceur à suivre (si plusieurs)", type: "texte", exemple: "107", redemarrage: true },
+    ],
+  },
+  {
     id: "sauvegardes",
     titre: "Sauvegardes et mises à jour",
     description: "Une sauvegarde est faite chaque nuit dans Documents\\Jarvis\\sauvegardes ; tu peux en envoyer une copie ailleurs.",

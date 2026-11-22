@@ -64,6 +64,7 @@ import { SettingsStore } from "./settings.js";
 import { sealSecrets } from "./secret-backup.js";
 import { describeLost, Watchdog } from "./watchdog.js";
 import { connectPlusHost } from "./plus-host.js";
+import { SuiviVoiture } from "./voiture-suivi.js";
 import { createRoutineRunner } from "./routine-runner.js";
 import { createIntentActions } from "./intent-actions.js";
 import { Updates } from "./updates.js";
@@ -2080,4 +2081,14 @@ const intentActions = createIntentActions({ askBrain, backups, env, learning, no
 
 const routineRunner = createRoutineRunner({ actions, agenda, applyDisposition, pages, phone, playWakePlaylist, reply, routines, security, setFlag, setSurveillance, spotify, spotifyHelpers, takeAbsentSince, tapo, wake });
 
-connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings: briefingActions, sante: () => healthStore.phrase() });
+const traccarUrl = env("VOITURE_TRACCAR_URL");
+const suivi = traccarUrl
+  ? new SuiviVoiture({
+      url: traccarUrl,
+      token: env("VOITURE_TRACCAR_TOKEN"),
+      email: env("VOITURE_TRACCAR_EMAIL"),
+      motDePasse: env("VOITURE_TRACCAR_MDP"),
+      appareil: env("VOITURE_TRACCAR_APPAREIL"),
+    })
+  : undefined;
+connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings: briefingActions, sante: () => healthStore.phrase(), voiture: () => (suivi ? suivi.phrase() : Promise.resolve("Le suivi de la voiture n'est pas configuré : va dans Réglages → Voiture (traceur GPS) pour relier ton serveur Traccar.")) });
