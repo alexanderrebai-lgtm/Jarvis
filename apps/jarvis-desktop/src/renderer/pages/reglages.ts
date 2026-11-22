@@ -21,7 +21,9 @@ const GROUP_ICONS: Record<string, string> = { general: ICONS.sun, tapo: ICONS.ho
 export function renderSettings(root: HTMLElement): void {
   const { page, tools } = buildPage({ id: "reglages", title: "Réglages", cols: "1fr" });
   page.classList.add("settings-page");
-  const restart = el("button", "chip warn hidden", "<i></i>Redémarrer Jarvis pour appliquer");
+  // Toujours visible ; passe en orange quand un réglage enregistré demande un redémarrage.
+  const restart = el("button", "chip", "<i></i>Redémarrer Jarvis");
+  restart.title = "Ferme et relance Jarvis (les réglages marqués ↻ sont pris en compte au redémarrage)";
   restart.onclick = () => api.send("jarvis:redemarrer");
   tools.prepend(restart);
 
@@ -37,7 +39,8 @@ export function renderSettings(root: HTMLElement): void {
   let needsRestart = false;
   const markRestart = () => {
     needsRestart = true;
-    restart.classList.remove("hidden");
+    restart.classList.add("warn");
+    restart.innerHTML = "<i></i>Redémarrer Jarvis pour appliquer";
   };
 
   const renderGroup = (g: Group): HTMLElement => {
@@ -144,7 +147,7 @@ export function renderSettings(root: HTMLElement): void {
     view = await api.invoke<View>("reglages:lire");
     menu.innerHTML = view.groupes.map((g) => `<a href="#groupe-${g.id}" data-g="${g.id}">${GROUP_ICONS[g.id] ?? ""}<span>${esc(g.titre)}</span></a>`).join("") + (view.coffre ? "" : '<p class="warn">Chiffrement indisponible : les mots de passe restent dans jarvis.env.</p>');
     content.replaceChildren(...view.groupes.map(renderGroup));
-    if (needsRestart) restart.classList.remove("hidden");
+    if (needsRestart) markRestart();
   };
   const focusGroup = (id: string) => {
     const target = document.getElementById(`groupe-${id}`);
