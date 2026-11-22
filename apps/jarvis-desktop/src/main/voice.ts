@@ -52,34 +52,88 @@ export class SentenceSplitter {
   }
 }
 
+/** Silence (en ms) qui sépare deux réponses : pendant une même réponse, la voix ne change jamais. */
+const BURST_MS = 20_000;
+/** Une phrase locale plus longue que ça (carte graphique occupée) compte comme « lente ». */
+const SLOW_MS = 7_000;
+/** Voix locale mise de côté après des échecs ou des lenteurs. */
+const LOCAL_PAUSE_MS = 10 * 60_000;
+
 export class Voice {
   private tts: MsEdgeTTS | undefined;
+  /** La voix choisie pour la réponse en cours : on n'en change pas au milieu d'une phrase à l'autre. */
+  private burst: { engine: "locale" | "en ligne"; last: number } | undefined;
+  private localPausedUntil = 0;
+  private slowCount = 0;
   /** Après une panne de la voix en ligne, on passe 5 minutes sur la voix de Windows (pas d'attente à chaque phrase). */
   private offlineUntil = 0;
   private readonly cache = new Map<string, { data: Buffer; mime: string }>();
   failures = 0;
   lastError: string | undefined;
   /** Voix locale (carte graphique), essayée d'abord quand elle est choisie. */
-  local: { active: () => boolean; synthesize: (text: string) => Promise<Buffer | undefined> } | undefined;
+  local:
+    | {
+        active: () => boolean;
+        synthesize: (text: string) => Promise<Buffer | undefined>;
+        /** Le modèle est chargé et répond. Absent = on le suppose prêt. */
+        ready?: () => boolean;
+        /** Lance le chargement en arrière-plan (20 à 60 s). */
+        warm?: () => void;
+      }
+    | undefined;
 
   constructor(private readonly voiceName = DEFAULT_VOICE, private readonly rate = "+0%", private readonly pitch = "+0Hz") {}
 
   get mode(): "locale" | "en ligne" | "secours Windows" {
-    if (this.local?.active()) return "locale";
+    if (this.local?.active() && Date.now() >= this.localPausedUntil && (this.local.ready?.() ?? true)) return "locale";
     return Date.now() < this.offlineUntil ? "secours Windows" : "en ligne";
+  }
+
+  /**
+   * Quelle voix pour cette phrase ? Une réponse entière garde la même voix : on ne choisit qu'au début d'une
+   * réponse (après un silence). La voix locale n'est prise que si son modèle est déjà chargé ; sinon la réponse
+   * part en voix en ligne et le modèle se charge en arrière-plan, pour la suivante.
+   */
+  private engineFor(now: number): "locale" | "en ligne" {
+    const b = this.burst;
+    if (b && now - b.last < BURST_MS && !(b.engine === "locale" && !this.local?.active())) return b.engine;
+    const l = this.local;
+    if (l?.active() && now >= this.localPausedUntil) {
+      if (l.ready?.() ?? true) return "locale";
+      l.warm?.();
+    }
+    return "en ligne";
   }
 
   /** Renvoie l'audio (mp3 ou wav) d'une phrase, prêt à être joué par l'interface. */
   async synthesize(text: string): Promise<{ data: Buffer; mime: string } | undefined> {
     const clean = speakable(text);
     if (!clean) return undefined;
-    const cached = this.cache.get(clean);
-    if (cached) return cached;
-    let audio: { data: Buffer; mime: string } | undefined;
-    if (this.local?.active()) {
-      const wav = await this.local.synthesize(clean).catch(() => undefined);
-      if (wav) return { data: wav, mime: "audio/wav" };
+    if (this.engineFor(Date.now()) === "locale") {
+      const debut = Date.now();
+      const wav = await this.local!.synthesize(clean).catch(() => undefined);
+      if (wav) {
+        // Deux phrases lentes de suite (carte graphique occupée) : voix en ligne pendant un moment, à la prochaine réponse.
+        this.slowCount = Date.now() - debut > SLOW_MS ? this.slowCount + 1 : 0;
+        if (this.slowCount >= 2) {
+          this.slowCount = 0;
+          this.localPausedUntil = Date.now() + LOCAL_PAUSE_MS;
+          this.lastError = "voix locale trop lente (carte graphique occupée ?) : voix en ligne pendant 10 minutes";
+        }
+        this.burst = { engine: "locale", last: Date.now() };
+        return { data: wav, mime: "audio/wav" };
+      }
+      // Échec : on met la voix locale de côté, et la suite part en voix en ligne (un seul changement, pas de va-et-vient).
+      this.localPausedUntil = Date.now() + LOCAL_PAUSE_MS;
+      this.burst = { engine: "en ligne", last: Date.now() };
     }
+    // Les phrases courtes de la voix en ligne reviennent souvent (« Je t'écoute. ») : on les garde, mais jamais pour la voix locale.
+    const cached = this.cache.get(clean);
+    if (cached) {
+      this.burst = { engine: "en ligne", last: Date.now() };
+      return cached;
+    }
+    let audio: { data: Buffer; mime: string } | undefined;
     if (Date.now() >= this.offlineUntil) {
       try {
         audio = { data: await this.edge(clean), mime: "audio/mpeg" };
@@ -92,11 +146,11 @@ export class Voice {
       }
     }
     audio ??= await this.windows(clean).catch(() => undefined);
-    // Les phrases courtes reviennent souvent (« Je t'écoute. », annonces de pages) : on les garde.
     if (audio && clean.length <= 60 && audio.mime === "audio/mpeg") {
       this.cache.set(clean, audio);
       if (this.cache.size > 80) this.cache.delete(this.cache.keys().next().value!);
     }
+    if (audio) this.burst = { engine: "en ligne", last: Date.now() };
     return audio;
   }
 

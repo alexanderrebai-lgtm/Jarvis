@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanTranscript, SentenceSplitter, speakable } from "../src/main/voice.js";
 
 describe("voix", () => {
@@ -118,5 +118,98 @@ describe("voix locale économe", () => {
     expect(Date.now() - t0).toBeLessThan(200);
     expect(started).toBe(1);
     expect(fetched).toBe(0);
+  });
+});
+
+describe("une seule voix par réponse", () => {
+  const WAV = Buffer.from("RIFFlocal");
+  const MP3 = Buffer.from("MP3enligne");
+  let maintenant = 1_000_000;
+
+  async function setup(local: Partial<NonNullable<import("../src/main/voice.js").Voice["local"]>> & { synthesize?: () => Promise<Buffer | undefined> }) {
+    const { Voice } = await import("../src/main/voice.js");
+    const v = new Voice();
+    (v as unknown as { edge: () => Promise<Buffer> }).edge = async () => MP3;
+    v.local = { active: () => true, synthesize: async () => WAV, ...local };
+    return v;
+  }
+  const dit = async (v: Awaited<ReturnType<typeof setup>>, phrase: string) => ((await v.synthesize(phrase))?.mime === "audio/wav" ? "locale" : "en ligne");
+
+  beforeEach(() => {
+    maintenant = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => maintenant);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("modèle local pas encore chargé : toute la réponse part en voix en ligne, même s'il devient prêt pendant ce temps", async () => {
+    let prete = false;
+    let chargements = 0;
+    const v = await setup({ ready: () => prete, warm: () => void chargements++ });
+    expect(await dit(v, "Première phrase de la réponse.")).toBe("en ligne");
+    prete = true; // le modèle finit de charger au milieu de la réponse
+    maintenant += 2_000;
+    expect(await dit(v, "Deuxième phrase de la réponse.")).toBe("en ligne");
+    maintenant += 2_000;
+    expect(await dit(v, "Troisième phrase de la réponse.")).toBe("en ligne");
+    expect(chargements).toBeGreaterThanOrEqual(1);
+    // la réponse suivante (après un silence) prend la voix locale
+    maintenant += 30_000;
+    expect(await dit(v, "Nouvelle réponse un peu plus tard.")).toBe("locale");
+  });
+
+  it("la voix locale échoue en cours de réponse : un seul changement, puis plus de va-et-vient", async () => {
+    let appels = 0;
+    let enPanne = false;
+    const v = await setup({ synthesize: async () => (++appels === 1 || !enPanne ? WAV : undefined) });
+    // la voix locale tombe en panne après la première phrase
+    const originale = v.local!.synthesize;
+    v.local!.synthesize = async (t) => {
+      const r = await originale(t);
+      enPanne = true;
+      return r;
+    };
+    const suite: string[] = [];
+    for (const p of ["Phrase une de la réponse.", "Phrase deux de la réponse.", "Phrase trois de la réponse.", "Phrase quatre de la réponse."]) {
+      suite.push(await dit(v, p));
+      maintenant += 1_500;
+    }
+    expect(suite).toEqual(["locale", "en ligne", "en ligne", "en ligne"]);
+    expect(appels).toBe(2); // la voix locale n'est plus sollicitée
+    // mise de côté 10 minutes, puis réessayée
+    maintenant += 5 * 60_000;
+    expect(await dit(v, "Réponse cinq minutes plus tard.")).toBe("en ligne");
+    maintenant += 6 * 60_000;
+    enPanne = false; // la voix locale est réparée
+    v.local!.synthesize = async () => WAV;
+    expect(await dit(v, "Réponse onze minutes plus tard.")).toBe("locale");
+  });
+
+  it("voix locale lente (carte graphique occupée) : deux phrases lentes et elle est mise de côté pour la réponse suivante", async () => {
+    const v = await setup({ synthesize: async () => ((maintenant += 9_000), WAV) });
+    expect(await dit(v, "Première phrase lente.")).toBe("locale");
+    expect(await dit(v, "Deuxième phrase lente.")).toBe("locale"); // la réponse en cours garde sa voix
+    maintenant += 30_000;
+    expect(await dit(v, "Réponse suivante.")).toBe("en ligne");
+    expect(v.lastError).toContain("trop lente");
+  });
+
+  it("une phrase courte en cache (voix en ligne) n'est jamais rejouée à la place de la voix locale", async () => {
+    let locale = false;
+    const v = await setup({ active: () => locale });
+    expect(await dit(v, "Je t'écoute.")).toBe("en ligne"); // mise en cache
+    locale = true;
+    maintenant += 30_000;
+    expect(await dit(v, "Je t'écoute.")).toBe("locale");
+  });
+
+  it("pendant un jeu (voix locale coupée), la réponse en cours bascule sans appeler la voix locale", async () => {
+    let active = true;
+    let appels = 0;
+    const v = await setup({ active: () => active, synthesize: async () => (appels++, WAV) });
+    expect(await dit(v, "Début de réponse.")).toBe("locale");
+    active = false;
+    maintenant += 1_000;
+    expect(await dit(v, "Suite de la réponse.")).toBe("en ligne");
+    expect(appels).toBe(1);
   });
 });

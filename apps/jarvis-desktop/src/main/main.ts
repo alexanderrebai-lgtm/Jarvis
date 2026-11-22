@@ -872,6 +872,8 @@ const voice = new Voice(env("JARVIS_VOICE") ?? DEFAULT_VOICE, env("JARVIS_VOICE_
 const localVoice = new LocalVoice(workspace, { assetsDir: assets, findPython: () => lab.findPython(), threads: () => tuning.threadsVoix });
 voice.local = {
   active: () => env("VOIX_MOTEUR") === "locale" && localVoice.installed && !flags.jeu,
+  ready: () => localVoice.status === "prete",
+  warm: () => void localVoice.start(),
   synthesize: (text) => localVoice.synthesize(text, { reference: env("VOIX_REFERENCE"), expressivite: Number((env("VOIX_EXPRESSIVITE") ?? "0.5").replace(",", ".")) || 0.5 }),
 };
 const sttSetting = env("STT_MODEL") ?? "auto";

@@ -166,7 +166,7 @@ export class LocalVoice {
       method: "POST",
       headers: { "content-type": "application/json", "x-jeton": this.token },
       body: JSON.stringify({ texte: text, ...(options.reference ? { reference: options.reference } : {}), expressivite: options.expressivite ?? 0.5 }),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(25_000),
     });
     if (!res.ok) {
       this.lastError = ((await res.json().catch(() => ({}))) as { erreur?: string }).erreur ?? `erreur ${res.status}`;
@@ -175,11 +175,11 @@ export class LocalVoice {
     return Buffer.from(await res.arrayBuffer());
   }
 
-  /** Sans phrase depuis un moment (20 min par défaut), le modèle est déchargé : la carte graphique retrouve sa mémoire. */
+  /** Sans phrase depuis un moment (1 h par défaut), le modèle est déchargé : la carte graphique retrouve sa mémoire. */
   private watchIdle(): void {
     if (this.idleTimer) return;
     this.idleTimer = setInterval(() => {
-      if (this.status === "prete" && Date.now() - this.lastUse > (this.options.idleMs ?? 20 * 60_000)) this.stop();
+      if (this.status === "prete" && Date.now() - this.lastUse > (this.options.idleMs ?? 60 * 60_000)) this.stop();
     }, 60_000);
     this.idleTimer.unref?.();
   }
