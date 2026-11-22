@@ -300,6 +300,10 @@ Au démarrage, Jarvis lit le matériel (page Diagnostic → Profil matériel) et
 - modèle de la bibliothèque libéré après 5 minutes sans recherche ;
 - processeur à puce graphique intégrée (Ryzen « G ») : l'interface de Jarvis peut tourner dessus, la carte NVIDIA reste aux jeux et à l'IA (Réglages → Toi et ta ville ; la puce doit être activée dans le BIOS).
 
+## Briefings programmés
+
+Réglages → Briefings programmés (ou « Hey Jarvis, chaque matin à 7 h résume-moi l'actualité du sim racing sur Telegram ») : une recherche web à heure fixe, que Jarvis te résume à la voix et/ou t'envoie sur Telegram. Choix du sujet, de l'heure, des jours et des canaux ; bouton « Envoyer maintenant » ; mise en pause. Un matin manqué (PC éteint) est rattrapé au démarrage, mais jamais la nuit. Claude peut aussi les créer, lister et supprimer à la voix (outils briefing_programmer, briefing_lister, briefing_supprimer).
+
 ## « Hey Jarvis » (mot d'éveil)
 
 Par défaut, un petit détecteur (modèles openWakeWord : code Apache 2.0, modèles pré-entraînés CC BY-NC-SA 4.0, usage personnel) écoute seulement « Hey Jarvis », par blocs de 80 ms : environ 25 ms de calcul par seconde de son, sur un seul cœur. Tant qu'il n'a pas entendu le mot, **rien n'est transcrit** : la reconnaissance vocale (Whisper) dort, et une phrase de la télé ou d'une conversation ne réveille plus Jarvis. « Hey Jarvis » coupe aussi Jarvis s'il est en train de parler. Réglages → Voix et oreilles : « Comment réveiller Jarvis » (ou revenir à « son nom dans la phrase ») et sensibilité.

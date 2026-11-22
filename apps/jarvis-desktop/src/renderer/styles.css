@@ -498,3 +498,5 @@ body.mode-jeu *, body.mode-jeu *::before, body.mode-jeu *::after { animation-pla
 .memory-fact p[contenteditable]:focus { outline: 1px solid var(--hud); border-radius: 6px; padding: 2px 6px; }
 .memory-meta { display: flex; align-items: center; gap: 8px; }
 .memory-meta small { flex: 1; color: var(--muted); font-size: 11px; }
+.connector-form .jours { display: flex; flex-wrap: wrap; gap: 10px; }
+.connector-form .jour { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text); white-space: nowrap; }

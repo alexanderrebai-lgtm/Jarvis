@@ -86,6 +86,12 @@ export interface PlusHost {
     demarrage: (nom: string, actif: boolean) => Promise<{ ok: boolean; message: string }>;
     fermer: (nom: string) => Promise<{ ok: boolean; message: string }>;
   };
+  /** Briefings programmés (recherche à heure fixe, envoyée à la voix et/ou sur Telegram). */
+  briefings: {
+    programmer: (input: { sujet: string; heure: string; jours?: string[]; canaux?: string[] }) => string;
+    lister: () => string[];
+    supprimer: (id: string) => boolean;
+  };
   showImage: (titre: string, file: string, page?: PageId) => Promise<void>;
 }
 
@@ -351,6 +357,14 @@ export function plusTools(h: PlusHost) {
     sdkTool("fichier_restaurer", "Remet une version d'un fichier (l'état actuel est gardé en copie).", { version: z.string(), chemin: z.string() }, safe(async ({ version, chemin }) => (h.versions.restore(version, path.resolve(h.workspace, chemin)), text("Restauré.")))),
     sdkTool("sauvegardes", "Sauvegardes (archives quotidiennes de la mémoire, des projets et des documents) ; maintenant=true pour en faire une tout de suite.", { maintenant: z.boolean().optional() }, safe(async ({ maintenant }) => text(maintenant ? await h.backups.run() : { derniere: h.backups.last, archives: h.listBackups() }))),
     sdkTool("sauvegarde_restaurer", "Extrait un fichier d'une archive de sauvegarde (chemin dans l'archive, par ex. projets/volant/JOURNAL.md) vers un dossier.", { archive: z.string(), fichier: z.string(), destination: z.string() }, safe(async ({ archive, fichier, destination }) => text(await h.restoreFromBackup(archive, fichier, path.resolve(h.workspace, destination))))),
+    sdkTool(
+      "briefing_programmer",
+      "Programme un briefing : une recherche web à heure fixe, envoyée à Alex. Exemples de demande : « chaque lundi à 8 h, résume-moi l'actualité des simulateurs de course sur Telegram ». jours : lun,mar,mer,jeu,ven,sam,dim (vide = tous les jours). canaux : voix, telegram (défaut voix).",
+      { sujet: z.string(), heure: z.string().describe("HH:MM, ex. 08:00"), jours: z.array(z.enum(["lun", "mar", "mer", "jeu", "ven", "sam", "dim"])).optional(), canaux: z.array(z.enum(["voix", "telegram"])).optional() },
+      safe(async ({ sujet, heure, jours, canaux }) => text(h.briefings.programmer({ sujet, heure, ...(jours ? { jours } : {}), ...(canaux ? { canaux } : {}) }))),
+    ),
+    sdkTool("briefing_lister", "Liste les briefings programmés.", {}, safe(async () => text(h.briefings.lister())), RO),
+    sdkTool("briefing_supprimer", "Supprime un briefing programmé (par son identifiant, visible dans briefing_lister).", { id: z.string() }, safe(async ({ id }) => text(h.briefings.supprimer(id) ? "Briefing supprimé." : "Briefing introuvable."))),
     sdkTool("pc_sante", "Bilan de santé du PC sur 30 jours : arrêts brutaux (coupure ou écran bleu), erreurs matérielles, plantages du pilote graphique, carte graphique, réglages, avec les causes probables.", {}, safe(async () => text(await h.pc.sante())), RO),
     sdkTool("pc_composants", "Diagnostic détaillé de chaque composant du PC : processeur, carte graphique (température, mémoire vidéo, puissance, fréquences, liaison PCIe), mémoire (utilisée, engagée, fichier d'échange, barrettes), disques (santé, température, usure, place libre), réseau, système, et les programmes les plus gourmands.", {}, safe(async () => text(await h.pc.composants())), RO),
     sdkTool("pc_optimisations", "Optimisations disponibles (catalogue sûr et réversible) avec leur état actuel, et programmes lancés au démarrage de Windows.", {}, safe(async () => text(await h.pc.optimisations())), RO),

@@ -17,11 +17,12 @@ import type { JarvisServices } from "./main.js";
  * Ce que les outils supplémentaires de Claude peuvent faire sur le PC (dispositions, recherche, bibliothèque, labo, garage, budget, papiers, sauvegardes, routines, minuteurs, port série…). Branché sur plusHostRef.
  */
 
-export type PlusHostDeps = Pick<JarvisServices, "actions" | "applyDisposition" | "backups" | "budget" | "dispositions" | "findObd" | "garage" | "lab" | "launchResearch" | "launchRoutine" | "learning" | "library" | "literature" | "localAI" | "mask" | "micro" | "obd" | "ownerName" | "pages" | "papers" | "plusHostRef" | "privacy" | "procedures" | "routines" | "runDiagnostic" | "showPanel" | "spotify" | "spotifyHelpers" | "tasks" | "timers" | "updateTray" | "veille" | "versions" | "wake" | "workFolder" | "workspace" | "pcCare">;
+export type PlusHostDeps = Pick<JarvisServices, "actions" | "applyDisposition" | "backups" | "budget" | "dispositions" | "findObd" | "garage" | "lab" | "launchResearch" | "launchRoutine" | "learning" | "library" | "literature" | "localAI" | "mask" | "micro" | "obd" | "ownerName" | "pages" | "papers" | "plusHostRef" | "privacy" | "procedures" | "routines" | "runDiagnostic" | "showPanel" | "spotify" | "spotifyHelpers" | "tasks" | "timers" | "updateTray" | "veille" | "versions" | "wake" | "workFolder" | "workspace" | "pcCare"> & { briefings: import("./plus-tools.js").PlusHost["briefings"] };
 
 export function connectPlusHost(d: PlusHostDeps) {
-  const { actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare } = d;
+  const { actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings } = d;
   plusHostRef.current = {
+    briefings,
     workspace,
     dispositions,
     applyDisposition: (nom) => applyDisposition(nom, false),

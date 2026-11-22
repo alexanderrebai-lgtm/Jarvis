@@ -146,8 +146,8 @@ export function renderSettings(root: HTMLElement): void {
   const load = async () => {
     view = await api.invoke<View>("reglages:lire");
     menu.innerHTML = view.groupes.map((g) => `<a href="#groupe-${g.id}" data-g="${g.id}">${GROUP_ICONS[g.id] ?? ""}<span>${esc(g.titre)}</span></a>`).join("") + (view.coffre ? "" : '<p class="warn">Chiffrement indisponible : les mots de passe restent dans jarvis.env.</p>');
-    content.replaceChildren(...view.groupes.map(renderGroup), renderConnectors());
-    menu.insertAdjacentHTML("beforeend", `<a href="#groupe-connecteurs" data-g="connecteurs">${ICONS.list}<span>Connecteurs (MCP)</span></a>`);
+    content.replaceChildren(...view.groupes.map(renderGroup), renderBriefings(), renderConnectors());
+    menu.insertAdjacentHTML("beforeend", `<a href="#groupe-briefings" data-g="briefings">${ICONS.alarm}<span>Briefings programmés</span></a><a href="#groupe-connecteurs" data-g="connecteurs">${ICONS.list}<span>Connecteurs (MCP)</span></a>`);
     if (needsRestart) markRestart();
   };
   const focusGroup = (id: string) => {
@@ -249,5 +249,72 @@ function renderConnectors(): HTMLElement {
       };
     });
   });
+  return card;
+}
+
+// ---------- Briefings programmés ----------
+
+interface Brief { id: string; sujet: string; heure: string; jours: string[]; canaux: string[]; actif: boolean }
+const JOURS: Array<[string, string]> = [["lun", "L"], ["mar", "M"], ["mer", "M"], ["jeu", "J"], ["ven", "V"], ["sam", "S"], ["dim", "D"]];
+
+/** Briefings programmés : une recherche web à heure fixe, envoyée à la voix et/ou sur Telegram. */
+function renderBriefings(): HTMLElement {
+  const card = el("section", "panel setting-group");
+  card.id = "groupe-briefings";
+  card.innerHTML = `<h4><span class="ic">${ICONS.alarm}</span>Briefings programmés</h4>`;
+  const body = el("div", "body");
+  body.innerHTML = `<p class="lead">Une recherche sur Internet à heure fixe, que Jarvis te résume à voix haute et/ou t'envoie sur Telegram. Par exemple : « l'actualité des simulateurs de course », chaque lundi à 8 h. Tu peux aussi le demander à la voix : « Hey Jarvis, chaque matin à 7 h résume-moi l'actu du sim racing sur Telegram ».</p>`;
+  const list = el("div", "connectors");
+  const status = el("div", "status");
+  const form = el("div", "connector-form");
+  form.innerHTML = `
+    <label class="field"><span class="name">Sujet</span><div class="line"><input data-f="sujet" placeholder="ex. l'actualité des simulateurs de course"></div></label>
+    <label class="field"><span class="name">Heure</span><div class="line"><input data-f="heure" type="time" value="08:00"></div></label>
+    <label class="field"><span class="name">Jours (aucun coché = tous les jours)</span><div class="line jours">${JOURS.map(([v, l]) => `<label class="jour"><input type="checkbox" data-jour="${v}"> ${l}</label>`).join("")}</div></label>
+    <label class="field"><span class="name">Envoi</span><div class="line"><label class="jour"><input type="checkbox" data-canal="voix" checked> À la voix</label> <label class="jour"><input type="checkbox" data-canal="telegram"> Sur Telegram</label></div></label>
+    <div class="buttons"><button class="primary" data-add>Programmer</button></div>`;
+  body.append(list, form, status);
+  card.append(body);
+  const say = (text: string, ok = true) => ((status.className = `status ${ok ? "ok" : "bad"}`), (status.textContent = text));
+
+  const draw = (briefs: Brief[]) => {
+    list.innerHTML = briefs.length
+      ? briefs
+          .map((b) => {
+            const quand = b.jours.length === 0 || b.jours.length === 7 ? "chaque jour" : b.jours.join(", ");
+            return `<div class="connector ${b.actif ? "" : "off"}"><div class="grow"><b>${esc(b.sujet)}</b> <small>${esc(quand)} à ${esc(b.heure)} · ${esc(b.canaux.join(" et "))}</small></div>
+              <button class="small" data-test="${esc(b.id)}">Envoyer maintenant</button>
+              <button class="small" data-toggle="${esc(b.id)}" data-on="${!b.actif}">${b.actif ? "Mettre en pause" : "Reprendre"}</button>
+              <button class="small ghost" data-del="${esc(b.id)}">Supprimer</button></div>`;
+          })
+          .join("")
+      : '<p class="empty">Aucun briefing programmé.</p>';
+    list.querySelectorAll<HTMLButtonElement>("[data-test]").forEach((btn) => {
+      btn.onclick = async () => {
+        btn.disabled = true;
+        say("Recherche en cours… (une à deux minutes)");
+        await api.invoke("briefings:tester", btn.dataset.test);
+        say("Briefing envoyé. Regarde (ou écoute) le résultat.");
+        btn.disabled = false;
+      };
+    });
+    list.querySelectorAll<HTMLButtonElement>("[data-toggle]").forEach((btn) => (btn.onclick = async () => draw((await api.invoke<{ briefings: Brief[] }>("briefings:basculer", { id: btn.dataset.toggle, actif: btn.dataset.on === "true" })).briefings)));
+    list.querySelectorAll<HTMLButtonElement>("[data-del]").forEach((btn) => (btn.onclick = async () => draw((await api.invoke<{ briefings: Brief[] }>("briefings:supprimer", btn.dataset.del)).briefings)));
+  };
+
+  form.querySelector<HTMLButtonElement>("[data-add]")!.onclick = async () => {
+    const sujet = form.querySelector<HTMLInputElement>('[data-f="sujet"]')!.value;
+    const heure = form.querySelector<HTMLInputElement>('[data-f="heure"]')!.value;
+    const jours = [...form.querySelectorAll<HTMLInputElement>("[data-jour]:checked")].map((c) => c.dataset.jour!);
+    const canaux = [...form.querySelectorAll<HTMLInputElement>("[data-canal]:checked")].map((c) => c.dataset.canal!);
+    const r = await api.invoke<{ ok: boolean; message?: string; briefings: Brief[] }>("briefings:ajouter", { sujet, heure, jours, canaux });
+    if (r.ok) {
+      form.querySelector<HTMLInputElement>('[data-f="sujet"]')!.value = "";
+      say("Programmé.");
+    } else say(r.message ?? "Erreur.", false);
+    draw(r.briefings);
+  };
+
+  void api.invoke<{ briefings: Brief[] }>("briefings:lister").then((r) => draw(r.briefings));
   return card;
 }

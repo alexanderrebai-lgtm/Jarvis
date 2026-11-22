@@ -67,6 +67,7 @@ import { createRoutineRunner } from "./routine-runner.js";
 import { createIntentActions } from "./intent-actions.js";
 import { Updates } from "./updates.js";
 import { ConnectorStore, CONNECTOR_PRESETS, testConnector, type ConnectorInput } from "./connectors.js";
+import { BriefingStore, briefingDue, describeBriefing, toISODate, type Briefing, type BriefingInput } from "./briefings.js";
 import { WakeWordEngine } from "./wake-word.js";
 import { MusicPanel } from "./music-panel.js";
 import { createPcCare } from "./pc-care.js";
@@ -599,6 +600,53 @@ const builtinMcp = {
   jarvis_plus: plusMcpServer(new Proxy({} as PlusHost, { get: (_t, key) => (plusHostRef.current as unknown as Record<string | symbol, unknown>)[key] })),
 };
 const connectors = new ConnectorStore(config.dataDir, vault);
+const briefingStore = new BriefingStore(config.dataDir);
+
+/** Fait la recherche d'un briefing et l'envoie (voix et/ou Telegram). */
+async function runBriefing(b: Briefing): Promise<void> {
+  briefingStore.markSent(b.id, toISODate(new Date()));
+  try {
+    const r = await brain.ask(
+      `Tu prépares un briefing pour ${ownerName}. Sujet : « ${b.sujet} ». Cherche sur Internet (WebSearch, WebFetch) les nouveautés et faits marquants récents. Réponds en français, tutoiement, en Markdown court (environ 1000 caractères) : d'abord UNE phrase de résumé parlé, puis 2 à 5 points avec les liens. Si rien de neuf, dis-le en une phrase.`,
+      {},
+      { separate: true },
+    );
+    const markdown = r.text.trim();
+    const parle = markdown.replace(/[#*_>\`\-]/g, " ").replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s/).slice(0, 2).join(" ");
+    actions.add({ outil: "briefing", resume: `${b.sujet} → envoyé (${b.canaux.join(", ")})`, autorise: true, origine: "automatique" });
+    if (b.canaux.includes("telegram") && phone.enabled) await phone.text(`Jarvis — briefing : ${b.sujet}\n\n${markdown.slice(0, 3500)}`).catch(() => undefined);
+    if (b.canaux.includes("voix")) {
+      showPanel({ titre: `Briefing : ${b.sujet}`, markdown });
+      if (!flags.doNotDisturb && !flags.jeu) say(`${ownerName}, briefing ${b.sujet}. ${parle}`);
+    }
+  } catch (error) {
+    actions.add({ outil: "briefing", resume: `${b.sujet} → échec : ${error instanceof Error ? error.message : String(error)}`, autorise: true, origine: "automatique" });
+  }
+}
+
+/** Toutes les minutes : lance les briefings dont c'est l'heure (rattrapage d'un matin manqué, mais pas la nuit). */
+function startBriefings(): void {
+  const tick = () => {
+    for (const b of briefingStore.list()) {
+      const due = briefingDue(b, new Date());
+      if (due === "lancer") void runBriefing(b);
+      else if (due === "rattrapage-tardif") briefingStore.markSent(b.id, toISODate(new Date()));
+    }
+  };
+  setTimeout(tick, 20_000);
+  setInterval(tick, 60_000);
+}
+
+const briefingActions = {
+  // Les valeurs de jours/canaux sont déjà validées par l'outil MCP (z.enum) ; le magasin refiltre par sécurité.
+  programmer: (input: { sujet: string; heure: string; jours?: string[]; canaux?: string[] }) => {
+    const b = briefingStore.add(input as BriefingInput);
+    actions.add({ outil: "briefing", resume: `Programmé : ${describeBriefing(b)}`, autorise: true });
+    return `${describeBriefing(b)}. Enregistré.`;
+  },
+  lister: () => briefingStore.list().map((b) => `${b.id} — ${describeBriefing(b)}${b.actif ? "" : " (en pause)"}`),
+  supprimer: (id: string) => briefingStore.remove(id),
+};
 
 const brain = new Brain({
   dataDir: config.dataDir,
@@ -1516,6 +1564,26 @@ ipcMain.handle("memoire:ajouter", (_event, fait: string) => (fait?.trim() ? note
 ipcMain.handle("memoire:modifier", (_event, payload: { id: string; fait: string }) => notes.updateMemory(payload.id, payload.fait.trim()));
 ipcMain.handle("memoire:oublier", (_event, id: string) => notes.forget(id));
 ipcMain.handle("memoire:note-supprimer", (_event, id: string) => notes.remove(id));
+
+// ---------- Briefings programmés (page Réglages) ----------
+const briefingList = () => ({ briefings: briefingStore.list() });
+ipcMain.handle("briefings:lister", () => briefingList());
+ipcMain.handle("briefings:ajouter", (_event, input: BriefingInput) => {
+  try {
+    briefingStore.add(input);
+    return { ok: true, ...briefingList() };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error), ...briefingList() };
+  }
+});
+ipcMain.handle("briefings:basculer", (_event, payload: { id: string; actif: boolean }) => (briefingStore.setActive(payload.id, payload.actif), briefingList()));
+ipcMain.handle("briefings:supprimer", (_event, id: string) => (briefingStore.remove(id), briefingList()));
+ipcMain.handle("briefings:tester", async (_event, id: string) => {
+  const b = briefingStore.list().find((x) => x.id === id);
+  if (!b) return { ok: false };
+  await runBriefing({ ...b, dernierEnvoi: undefined });
+  return { ok: true };
+});
 ipcMain.handle("journal:lire", (_event, date?: string) => {
   const jours = actions.days().slice(0, 60);
   const jour = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : (jours[0] ?? new Date().toISOString().slice(0, 10));
@@ -1729,6 +1797,7 @@ void app.whenReady().then(async () => {
   veille.start();
   papers.start();
   backups.start();
+  startBriefings();
   if (!startupTest) {
     watchdog.start();
     setTimeout(() => void checkLastShutdown().catch((e) => console.warn("[santé]", e)), 2 * 60_000);
@@ -1890,4 +1959,4 @@ const intentActions = createIntentActions({ askBrain, backups, env, learning, no
 
 const routineRunner = createRoutineRunner({ actions, agenda, applyDisposition, pages, phone, playWakePlaylist, reply, routines, security, setFlag, setSurveillance, spotify, spotifyHelpers, takeAbsentSince, tapo, wake });
 
-connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare });
+connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings: briefingActions });
