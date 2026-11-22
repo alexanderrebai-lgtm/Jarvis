@@ -271,6 +271,7 @@ function updateTray(): void {
       { label: "Caméras", type: "checkbox", checked: flags.cameras, click: () => setFlag("cameras", !flags.cameras) },
       { label: "Ne pas déranger", type: "checkbox", checked: flags.doNotDisturb, click: () => setFlag("doNotDisturb", !flags.doNotDisturb) },
       { label: "Mode jeu (libère la carte graphique)", type: "checkbox", checked: flags.jeu, click: () => (pcCare.setGameManual(!flags.jeu), updateGameMode()) },
+      { label: "Surveiller mon écran", type: "checkbox", checked: screenWatchOn(), click: () => ((screenWatchOverride = !screenWatchOn()), (lastScreenCheck = 0), updateTray()) },
       { label: "Surveillance", submenu: (["off", "simple", "complete"] as const).map((m) => ({ label: { off: "Arrêtée", simple: "Simple", complete: "Complète" }[m], type: "radio" as const, checked: flags.surveillance === m, click: () => setSurveillance(m) })) },
       { type: "separator" },
       { label: "Diagnostic", click: () => pages.openPage("diagnostic") },
@@ -635,6 +636,65 @@ function startBriefings(): void {
   };
   setTimeout(tick, 20_000);
   setInterval(tick, 60_000);
+}
+
+// ---------- Mode « regarde mon écran » (optionnel) ----------
+
+/** Choix à la voix (« surveille/arrête mon écran ») ; sinon le réglage ECRAN_VEILLE décide. */
+let screenWatchOverride: boolean | undefined;
+let lastScreenCheck = 0;
+function screenWatchIntervalMs(): number {
+  const m = Number(env("ECRAN_VEILLE"));
+  return Number.isFinite(m) && m > 0 ? m * 60_000 : 5 * 60_000;
+}
+function screenWatchOn(): boolean {
+  if (screenWatchOverride !== undefined) return screenWatchOverride;
+  return Number(env("ECRAN_VEILLE")) > 0;
+}
+
+async function screenCheck(): Promise<void> {
+  if (!screenWatchOn() || flags.jeu || flags.doNotDisturb || flags.speaking || conversation.active) return;
+  try {
+    const r = await brain.ask(
+      "Regarde mon écran avec l'outil ecran_capture (une seule capture). Y a-t-il, LÀ MAINTENANT, un vrai problème visible sur lequel tu peux m'aider : message d'erreur, fenêtre bloquée, échec évident ? Si oui, réponds par UNE phrase courte, concrète et utile. Sinon, ou en cas de doute, réponds EXACTEMENT le mot RIEN. N'exécute aucune action, ne clique sur rien : tu ne fais que regarder.",
+      {},
+      { separate: true },
+    );
+    const out = r.text.trim();
+    if (out && !/^rien\b/i.test(out) && out.length < 400) {
+      actions.add({ outil: "regard écran", resume: out.slice(0, 200), autorise: true, origine: "automatique" });
+      if (!flags.doNotDisturb && !flags.jeu) say(`${ownerName}, ${out}`);
+    }
+  } catch (error) {
+    console.warn("[regard écran]", error);
+  }
+}
+
+function startScreenWatch(): void {
+  setInterval(() => {
+    if (!screenWatchOn()) return;
+    if (Date.now() - lastScreenCheck < screenWatchIntervalMs()) return;
+    lastScreenCheck = Date.now();
+    void screenCheck();
+  }, 60_000);
+}
+
+/** Commande vocale « surveille / arrête de regarder mon écran ». Renvoie true si c'en était une. */
+function handleScreenWatchCommand(command: string): boolean {
+  const t = command.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
+  if (/^(regarde|surveille|observe|garde un ?oeil sur)( mon| l'?)? ?ecran$/.test(t)) {
+    screenWatchOverride = true;
+    lastScreenCheck = 0;
+    reply("D'accord, je garde un œil sur ton écran. Je ne te parle que si je vois un souci sur lequel je peux aider.");
+    void screenCheck();
+    return true;
+  }
+  if (/^(arrete|stop|cesse)( de)? (regarder|surveiller|observer)( mon| l'?)? ?ecran$/.test(t)) {
+    screenWatchOverride = false;
+    reply("Je ne surveille plus ton écran.");
+    return true;
+  }
+  return false;
 }
 
 const briefingActions = {
@@ -1195,7 +1255,9 @@ function resetEnrollIndex(): void {
 async function handleCommand(text: string, source: "voix" | "clavier", trust: "proprietaire" | "inconnu" = "proprietaire"): Promise<void> {
   const command = text.trim();
   if (!command) return;
-  if (/^(stop|arr[êe]te|tais-toi|silence|annule)\b/i.test(command) && !/r[ée]veil|minuteur|musique|surveillance/i.test(command)) {
+  // « arrête de regarder mon écran » est une commande à part entière, pas un ordre d'interruption.
+  if (handleScreenWatchCommand(command)) return;
+  if (/^(stop|arr[êe]te|tais-toi|silence|annule)\b/i.test(command) && !/r[ée]veil|minuteur|musique|surveillance|[ée]cran/i.test(command)) {
     stopSpeaking();
     brain.stop();
     setState("veille");
@@ -1648,6 +1710,7 @@ function applySettings(keys: string[]): void {
   if (keys.includes("ECOUTE_MODE")) void startWakeWord();
   if (keys.includes("EVEIL_SEUIL") && wakeEngine) wakeEngine.threshold = wakeThreshold();
   if (keys.includes("GPU_INTERFACE")) void applyGpuPreference();
+  if (keys.includes("ECRAN_VEILLE")) (screenWatchOverride = undefined), (lastScreenCheck = 0);
   if (keys.includes("VOIX_SEUIL") && env("VOIX_SEUIL")) voiceLock.setThreshold(Number(env("VOIX_SEUIL")!.replace(",", ".")));
   if (keys.some((k) => k.startsWith("REVEIL") || k.startsWith("PLANNING"))) void wake?.refresh();
 }
@@ -1798,6 +1861,7 @@ void app.whenReady().then(async () => {
   papers.start();
   backups.start();
   startBriefings();
+  startScreenWatch();
   if (!startupTest) {
     watchdog.start();
     setTimeout(() => void checkLastShutdown().catch((e) => console.warn("[santé]", e)), 2 * 60_000);

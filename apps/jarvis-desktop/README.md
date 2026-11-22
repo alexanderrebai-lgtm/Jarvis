@@ -300,6 +300,10 @@ Au démarrage, Jarvis lit le matériel (page Diagnostic → Profil matériel) et
 - modèle de la bibliothèque libéré après 5 minutes sans recherche ;
 - processeur à puce graphique intégrée (Ryzen « G ») : l'interface de Jarvis peut tourner dessus, la carte NVIDIA reste aux jeux et à l'IA (Réglages → Toi et ta ville ; la puce doit être activée dans le BIOS).
 
+## Regarde mon écran (optionnel)
+
+Claude peut déjà regarder l'écran sur demande (« Hey Jarvis, qu'est-ce qu'il y a sur mon écran ? »). En plus, Réglages → Toi et ta ville → « Jarvis surveille mon écran » (par défaut non) : toutes les 5, 10 ou 15 minutes, Jarvis jette un œil et **ne parle que s'il voit un vrai souci** sur lequel il peut aider (erreur, blocage). Il se tait pendant un jeu et en « ne pas déranger », et chaque coup d'œil est une courte demande à Claude. À la voix : « surveille mon écran » / « arrête de regarder mon écran ».
+
 ## Briefings programmés
 
 Réglages → Briefings programmés (ou « Hey Jarvis, chaque matin à 7 h résume-moi l'actualité du sim racing sur Telegram ») : une recherche web à heure fixe, que Jarvis te résume à la voix et/ou t'envoie sur Telegram. Choix du sujet, de l'heure, des jours et des canaux ; bouton « Envoyer maintenant » ; mise en pause. Un matin manqué (PC éteint) est rattrapé au démarrage, mais jamais la nuit. Claude peut aussi les créer, lister et supprimer à la voix (outils briefing_programmer, briefing_lister, briefing_supprimer).
