@@ -231,17 +231,21 @@ async function vueMaison(): Promise<void> {
 // ---------- Mémoire ----------
 
 async function vueMemoire(): Promise<void> {
-  const [mem, idees] = await Promise.all([appel("memoire:lire"), appel("ameliorations:lire").catch(() => ({ propositions: [] }))]);
+  const [mem, idees, rang] = await Promise.all([appel("memoire:lire"), appel("ameliorations:lire").catch(() => ({ propositions: [] })), appel("rangement:lire").catch(() => ({ propositions: [] }))]);
+  const rangs = (rang.propositions as any[]).filter((p) => p.etat === "proposee");
   const faits = mem.faits as Array<{ id: string; fait: string }>;
   const rappels = (mem.rappels ?? []) as Array<{ cle: string; texte: string; instant: string; avis?: string }>;
   const ouvertes = (idees.propositions as any[]).filter((p) => p.etat === "proposee");
   vue.innerHTML = `
+    ${rangs.length ? `<div class="card"><h2>Rangement de la mémoire</h2>${rangs.map((p) => `<div class="row"><div class="g"><b>${p.type === "fusion" ? "Fusionner" : "Oublier"}</b> : ${p.concernes.map((c: string) => `« ${esc(c)} »`).join(" + ")}${p.type === "fusion" ? `<br>→ « ${esc(p.texte ?? "")} »` : ""}<br><span class="muted">${esc(p.pourquoi)}</span></div><div><button class="b small" data-rok="${esc(p.id)}">Oui</button> <button class="b small" data-rno="${esc(p.id)}">Non</button></div></div>`).join("")}</div>` : ""}
     ${ouvertes.length ? `<div class="card"><h2>Idées d'amélioration</h2>${ouvertes.map((p) => `<div class="row"><div class="g"><b>${esc(p.titre)}</b><br>${esc(p.regle)}<br><span class="muted">${esc(p.pourquoi)}</span></div><div><button class="b small" data-ok="${esc(p.id)}">Oui</button> <button class="b small" data-non="${esc(p.id)}">Non</button></div></div>`).join("")}</div>` : ""}
     <div class="card"><h2>Ce que Jarvis a ressorti</h2>${rappels.length ? rappels.map((r) => `<div class="row"><div class="g">${esc(r.texte)}<br><span class="muted">${jour(r.instant)} ${heure(r.instant)}</span></div><div><button class="b small${r.avis === "utile" ? " primary" : ""}" data-u="${esc(r.cle)}">👍</button> <button class="b small${r.avis === "inutile" ? " primary" : ""}" data-i="${esc(r.cle)}">👎</button></div></div>`).join("") : `<p class="muted">Rien pour l'instant.</p>`}</div>
     <div class="card"><h2>Ajouter un souvenir</h2><textarea class="t" id="nouveau" rows="2" placeholder="ex. Je préfère le café sans sucre."></textarea><button class="b primary" id="ajout">Retenir</button></div>
     <div class="card"><h2>Ce que je sais de toi (${faits.length})</h2>${faits.length ? faits.map((f) => `<div class="row"><div class="g">${esc(f.fait)}</div><button class="b small bad" data-f="${esc(f.id)}">Oublier</button></div>`).join("") : `<p class="muted">Rien pour l'instant.</p>`}</div>`;
   const recharger = () => void ouvrir("memoire");
   const sur = (sel: string, fn: (v: string) => Promise<unknown>, attr: string) => vue.querySelectorAll<HTMLElement>(sel).forEach((b) => (b.onclick = async () => (await fn(b.getAttribute(attr)!).catch((e) => alert(e.message)), recharger())));
+  sur("[data-rok]", (id) => appel("rangement:decider", { id, accepte: true }), "data-rok");
+  sur("[data-rno]", (id) => appel("rangement:decider", { id, accepte: false }), "data-rno");
   sur("[data-ok]", (id) => appel("ameliorations:decider", { id, accepte: true }), "data-ok");
   sur("[data-non]", (id) => appel("ameliorations:decider", { id, accepte: false }), "data-non");
   sur("[data-u]", (cle) => appel("rappel:retour", { cle, avis: "utile" }), "data-u");

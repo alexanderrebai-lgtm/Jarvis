@@ -75,6 +75,7 @@ import { avecRelecture, promptRelecteur } from "./relecture.js";
 import { MobileServer, canalAutorise, type Niveau as NiveauMobile } from "./mobile.js";
 import { TelegramInbox } from "./telegram-in.js";
 import { Approbations, exigeApprobation, modeApprobation } from "./approbations.js";
+import { RangementStore, reviser as reviserMemoire } from "./rangement.js";
 import { AmeliorationStore, revue as faireRevue } from "./amelioration.js";
 import { createRoutineRunner } from "./routine-runner.js";
 import { createIntentActions } from "./intent-actions.js";
@@ -980,8 +981,31 @@ function startAmeliorations(): void {
     if (flags.jeu || autoBloque() || h < 10 || h >= 20 || !ameliorations.due(new Date())) return;
     void lancerRevue().catch((e) => console.warn("[amélioration]", e));
   };
+  const tickRangement = () => {
+    const h = new Date().getHours();
+    if (flags.jeu || autoBloque() || h < 10 || h >= 20 || !rangement.due(new Date())) return;
+    void lancerRangement().catch((e) => console.warn("[rangement]", e));
+  };
+  setTimeout(tickRangement, 8 * 60_000);
+  setInterval(tickRangement, 3 * 3_600_000);
   setTimeout(tick, 5 * 60_000);
   setInterval(tick, 3 * 3_600_000);
+}
+
+// ---------- Rangement de la mémoire (revue hebdomadaire) ----------
+const rangement = new RangementStore(config.dataDir);
+async function lancerRangement(): Promise<{ propositions: number; message: string }> {
+  const r = await reviserMemoire({ notes, store: rangement, ask: (prompt) => brain.ask(mask(prompt), {}, { trust: "restreint", outils: [], source: "rangement mémoire" }) });
+  if (r.propositions > 0) host.notify("Jarvis range ta mémoire", r.message);
+  return r;
+}
+/** Ce que l'interface montre : chaque proposition avec le texte des souvenirs concernés. */
+function rangementVue() {
+  const faits = new Map(notes.memories().map((x) => [x.id, x.fait] as const));
+  return {
+    propositions: rangement.liste().map((p) => ({ ...p, concernes: p.anciens ? p.anciens.map((a) => a.fait) : p.ids.map((i) => faits.get(i) ?? "(souvenir supprimé)") })),
+    derniereRevue: rangement.derniereRevue() ?? null,
+  };
 }
 
 // ---------- Coût et usage de Claude ----------
@@ -1985,6 +2009,18 @@ ipcMain.handle("ameliorations:decider", (_event, payload: { id: string; accepte:
   return { propositions: ameliorations.liste(), derniereRevue: ameliorations.derniereRevue() ?? null };
 });
 ipcMain.handle("ameliorations:lancer", async () => ({ ...(await lancerRevue()), propositions: ameliorations.liste(), derniereRevue: ameliorations.derniereRevue() ?? null }));
+ipcMain.handle("rangement:lire", () => rangementVue());
+ipcMain.handle("rangement:decider", (_event, payload: { id: string; accepte: boolean }) => {
+  const p = rangement.decider(payload.id, payload.accepte === true, notes);
+  if (p) actions.add({ outil: "rangement mémoire", resume: `${payload.accepte ? "Accepté" : "Refusé"} : ${p.type} — ${p.pourquoi}`, autorise: true });
+  return rangementVue();
+});
+ipcMain.handle("rangement:annuler", (_event, payload: { id: string }) => {
+  const p = rangement.annuler(payload.id, notes);
+  if (p) actions.add({ outil: "rangement mémoire", resume: `Annulé (souvenirs rétablis) : ${p.type}`, autorise: true });
+  return rangementVue();
+});
+ipcMain.handle("rangement:lancer", async () => ({ ...(await lancerRangement()), ...rangementVue() }));
 ipcMain.handle("approbations:lister", () => ({ attente: approbations.enAttente(), recentes: approbations.recentes(5) }));
 ipcMain.handle("approbations:repondre", (_event, payload: { id: string; accepte: boolean }) => approbations.repondre(payload.id, payload.accepte === true));
 ipcMain.handle("capacites:lire", () => ({ liste: capaciteListe(), bilan: bilan(capaciteListe()), verifs: verifStore.all(), testables: checks.map((c) => c.id) }));
@@ -2437,7 +2473,7 @@ const suivi = traccarUrl
       appareil: env("VOITURE_TRACCAR_APPAREIL"),
     })
   : undefined;
-connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings: briefingActions, sante: () => healthStore.phrase(), cout: () => phraseUsage(usage.summary(30), usagePlafond()), capacites: () => phraseCapacites(capaciteListe()), revue: async () => (await lancerRevue()).message, verifier: async () => phraseVerifications(await testerChezMoi()), voiture: () => (suivi ? suivi.phrase() : Promise.resolve("Le suivi de la voiture n'est pas configuré : va dans Réglages → Voiture (traceur GPS) pour relier ton serveur Traccar.")) });
+connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings: briefingActions, sante: () => healthStore.phrase(), cout: () => phraseUsage(usage.summary(30), usagePlafond()), capacites: () => phraseCapacites(capaciteListe()), revue: async () => (await lancerRevue()).message, verifier: async () => phraseVerifications(await testerChezMoi()), ranger: async () => (await lancerRangement()).message, voiture: () => (suivi ? suivi.phrase() : Promise.resolve("Le suivi de la voiture n'est pas configuré : va dans Réglages → Voiture (traceur GPS) pour relier ton serveur Traccar.")) });
 
 
 // ---------- Test de bout en bout (« Tester chez moi ») ----------

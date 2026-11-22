@@ -97,6 +97,7 @@ export interface PlusHost {
   capacites: () => string;
   revue: () => Promise<string>;
   verifier: () => Promise<string>;
+  ranger: () => Promise<string>;
   voiture: () => Promise<string>;
   showImage: (titre: string, file: string, page?: PageId) => Promise<void>;
 }
@@ -371,6 +372,7 @@ export function plusTools(h: PlusHost) {
     ),
     sdkTool("sante_resume", "Dernieres donnees de sante d\u2019Alex (pas, rythme cardiaque, sommeil) recues de sa montre connectee.", {}, safe(async () => text(h.sante())), RO),
     sdkTool("amelioration_revue", "Fait tout de suite la revue d\u2019auto-amélioration : Jarvis relit ses échecs récents (corrections, reformulations, refus) et propose à Alex des règles de conduite à valider dans la page Journal. Rien n\u2019est appliqué sans son accord.", {}, safe(async () => text(await h.revue()))),
+    sdkTool("memoire_ranger", "Range la mémoire d\u2019Alex : Claude relit ses souvenirs et PROPOSE de fusionner les doublons et d\u2019oublier ce qui est périmé. Rien n\u2019est appliqué sans son accord (page Mémoire), et tout peut être annulé.", {}, safe(async () => text(await h.ranger()))),
     sdkTool("test_chez_moi", "Fait le test de bout en bout : vérifie pour de vrai chaque fonction de Jarvis (Claude, voix, Google, Spotify, maison, caméras, Telegram, montre, voiture, téléphone…) et rend le verdict (marche / à surveiller / en échec / non configuré) avec le conseil. À utiliser pour « est-ce que tout marche ? », « fais le point sur mon installation ». Envoie un court message de test Telegram si configuré.", {}, safe(async () => text(await h.verifier()))),
     sdkTool("capacites_etat", "Ce que Jarvis sait faire, ce qui est actif chez Alex et ce qu\u2019il manque pour le reste (à utiliser pour « qu\u2019est-ce que tu sais faire ? », « qu\u2019est-ce que je peux configurer ? »).", {}, safe(async () => text(h.capacites())), RO),
     sdkTool("cout_claude", "Consommation de Claude par Jarvis : appels et coût du jour et du mois, ce qui consomme le plus (surveillance d\u2019écran, briefings, mails…), plafond du jour.", {}, safe(async () => text(h.cout())), RO),

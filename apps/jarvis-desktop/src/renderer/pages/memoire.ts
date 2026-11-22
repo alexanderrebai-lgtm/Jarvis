@@ -19,7 +19,8 @@ export function renderMemory(root: HTMLElement): void {
   const add = panel("Ajouter un souvenir", "", { icon: ICONS.note, accent: "green" });
   add.body.innerHTML = `<textarea class="memory-new" rows="3" placeholder="ex. Je préfère qu'on me réveille en douceur, avec de la musique calme."></textarea><button class="health-button" data-add>Retenir</button>`;
   const proactif = panel("Ce que Jarvis a ressorti", "", { icon: ICONS.pulse, link: false });
-  left.append(about.root, add.root, proactif.root);
+  const rang = panel("Rangement de la mémoire", "", { icon: ICONS.list, accent: "gold", link: false });
+  left.append(about.root, add.root, proactif.root, rang.root);
 
   const facts = panel("Ce que je sais de toi", "grow", { icon: ICONS.list, link: false });
   center.append(facts.root);
@@ -77,7 +78,32 @@ export function renderMemory(root: HTMLElement): void {
     });
   };
 
+  interface Rang { id: string; type: "fusion" | "oubli"; texte?: string; pourquoi: string; etat: string; concernes: string[] }
+  interface RangData { propositions: Rang[]; derniereRevue: string | null; message?: string }
+  const drawRang = (d: RangData) => {
+    const ouvertes = d.propositions.filter((p) => p.etat === "proposee");
+    const faites = d.propositions.filter((p) => p.etat === "acceptee");
+    rang.body.innerHTML = `<p class="lead">Chaque semaine, Jarvis cherche les doublons et le périmé. Tu valides ; tu peux annuler.</p>${d.message ? `<p class="tip">${esc(d.message)}</p>` : ""}
+      ${ouvertes.map((p) => `<div class="memory-note" data-rg="${esc(p.id)}"><p><b>${p.type === "fusion" ? "Fusionner" : "Oublier"}</b> : ${p.concernes.map((c) => `« ${esc(c)} »`).join(" + ")}${p.type === "fusion" ? `<br>→ « ${esc(p.texte ?? "")} »` : ""}<br><small>${esc(p.pourquoi)}</small></p><div class="memory-meta"><button class="health-button small" data-ok>Accepter</button><button class="health-button small" data-no>Refuser</button></div></div>`).join("") || '<div class="empty">Rien à ranger pour l\'instant.</div>'}
+      ${faites.map((p) => `<div class="memory-note" data-rg="${esc(p.id)}"><p>✅ ${p.type === "fusion" ? "Fusionné" : "Oublié"} : ${p.concernes.map((c) => `« ${esc(c)} »`).join(" + ")}</p><div class="memory-meta"><button class="health-button small" data-undo>Annuler</button></div></div>`).join("")}
+      <div class="memory-meta"><small>${d.derniereRevue ? `Dernière revue : ${esc(new Date(d.derniereRevue).toLocaleDateString("fr-FR"))}` : "Pas encore de revue."}</small><button class="health-button small" data-run>Ranger maintenant</button></div>`;
+    rang.body.querySelectorAll<HTMLElement>("[data-rg]").forEach((n) => {
+      const agir = async (canal: string, payload: unknown) => {
+        drawRang(await api.invoke<RangData>(canal, payload));
+        await load();
+      };
+      n.querySelector<HTMLButtonElement>("[data-ok]")?.addEventListener("click", () => void agir("rangement:decider", { id: n.dataset.rg, accepte: true }));
+      n.querySelector<HTMLButtonElement>("[data-no]")?.addEventListener("click", () => void agir("rangement:decider", { id: n.dataset.rg, accepte: false }));
+      n.querySelector<HTMLButtonElement>("[data-undo]")?.addEventListener("click", () => void agir("rangement:annuler", { id: n.dataset.rg }));
+    });
+    rang.body.querySelector<HTMLButtonElement>("[data-run]")!.onclick = async (ev) => {
+      (ev.target as HTMLButtonElement).disabled = true;
+      drawRang(await api.invoke<RangData>("rangement:lancer"));
+    };
+  };
+
   const load = async () => {
+    void api.invoke<RangData>("rangement:lire").then(drawRang).catch(() => undefined);
     data = await api.invoke<{ faits: Fact[]; notes: Note[]; rappels: Rappel[] }>("memoire:lire");
     draw();
   };

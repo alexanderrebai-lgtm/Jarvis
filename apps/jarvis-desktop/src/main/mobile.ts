@@ -24,12 +24,12 @@ export type Niveau = "chiffre" | "maison";
 /** Lecture seule, permise partout (réseau de la maison compris) : rien de personnel. */
 export const LECTURE_MAISON = ["capacites:lire", "cout:lire", "forme:lire", "jeu:etat"];
 /** Lecture complète : seulement par le réseau chiffré. */
-export const LECTURE_CHIFFRE = [...LECTURE_MAISON, "page:data", "journal:lire", "connecteurs:lister", "memoire:lire", "briefings:lister", "ameliorations:lire", "musique:etat", "approbations:lister"];
+export const LECTURE_CHIFFRE = [...LECTURE_MAISON, "page:data", "journal:lire", "connecteurs:lister", "memoire:lire", "briefings:lister", "ameliorations:lire", "musique:etat", "approbations:lister", "rangement:lire"];
 /** Actions : seulement par le réseau chiffré. Ni réglages, ni création de connecteurs, ni actions système du PC. */
 export const ECRITURE_CHIFFRE = [
   "tapo:toggle", "securite:armer", "securite:mode", "reveil:passer", "musique:commande",
   "memoire:ajouter", "memoire:modifier", "memoire:oublier", "memoire:note-supprimer", "rappel:retour",
-  "ameliorations:decider", "ameliorations:lancer", "briefings:ajouter", "briefings:basculer", "briefings:supprimer", "approbations:repondre",
+  "ameliorations:decider", "ameliorations:lancer", "briefings:ajouter", "briefings:basculer", "briefings:supprimer", "approbations:repondre", "rangement:decider", "rangement:annuler", "rangement:lancer",
 ];
 
 export function canalAutorise(canal: string, niveau: Niveau): "lecture" | "ecriture" | undefined {
