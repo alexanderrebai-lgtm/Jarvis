@@ -306,7 +306,7 @@ Par défaut, un petit détecteur (modèles openWakeWord : code Apache 2.0, modè
 
 ## Connecteurs MCP et page Mémoire
 
-- **Connecteurs (Réglages → Connecteurs MCP)** : des outils en plus pour Claude au format standard MCP (Home Assistant, GitHub, Notion, un dossier du PC…), soit un programme lancé sur le PC, soit une adresse web. Exemples préremplis ; bouton « Tester » qui se connecte et liste les outils ; jetons au coffre-fort (refusés si le coffre-fort n'est pas disponible) ; relus à chaque conversation, sans redémarrer. Une voix inconnue ne peut pas s'en servir et chaque utilisation est notée dans le Journal.
+- **Connecteurs (Réglages → Connecteurs MCP)** : des outils en plus pour Claude au format standard MCP (Home Assistant, GitHub, Notion, un dossier du PC, mémoire de l'écran Screenpipe, imprimante 3D Bambu, voiture connectée via Home Assistant…), soit un programme lancé sur le PC, soit une adresse web. Exemples préremplis ; bouton « Tester » qui se connecte et liste les outils ; jetons au coffre-fort (refusés si le coffre-fort n'est pas disponible) ; relus à chaque conversation, sans redémarrer. Une voix inconnue ne peut pas s'en servir et chaque utilisation est notée dans le Journal.
 - **Page Mémoire** (« Jarvis, ouvre ta mémoire ») : tout ce que Jarvis a retenu de toi, à chercher, corriger (cliquer sur le texte) ou oublier ; ajout manuel d'un souvenir ; notes et rappels.
 
 ## Mot d'éveil, mode absent et journal

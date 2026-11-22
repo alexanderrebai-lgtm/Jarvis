@@ -60,6 +60,37 @@ export const CONNECTOR_PRESETS: Array<{ nom: string; libelle: string; type: Conn
     commande: "npx -y @modelcontextprotocol/server-filesystem C:\\Users\\Moi\\Documents",
     aide: "Donne à Claude l'accès à un dossier précis (remplace le chemin). Il faut Node.js installé (nodejs.org).",
   },
+  {
+    nom: "notion",
+    libelle: "Notion",
+    type: "web",
+    url: "https://mcp.notion.com/mcp",
+    secrets: "Authorization=Bearer ",
+    aide: "Serveur MCP officiel de Notion. Crée une intégration sur notion.so/my-integrations, copie son jeton (« secret ») et colle-le après « Bearer ». Partage ensuite les pages voulues avec l'intégration.",
+  },
+  {
+    nom: "memoire-ecran",
+    libelle: "Mémoire de l'écran (Screenpipe)",
+    type: "web",
+    url: "http://localhost:3030/mcp",
+    aide: "Screenpipe enregistre en local ce qui passe à l'écran et le rend consultable (« qu'est-ce que je regardais à 14 h ? »). Installe-le depuis screenpi.pe, puis active son serveur MCP. Tout reste sur le PC. Vérifie le port exact dans Screenpipe.",
+  },
+  {
+    nom: "imprimante-3d",
+    libelle: "Imprimante 3D Bambu Lab",
+    type: "commande",
+    commande: "npx -y bambu-mcp",
+    secrets: "BAMBU_IP=\nBAMBU_SERIAL=\nBAMBU_ACCESS_CODE=",
+    aide: "Pilote une Bambu Lab sur le réseau de la maison (état, pause, lumière). Mets l'imprimante en mode « LAN Only → Developer Mode », puis renseigne son adresse IP, son numéro de série et le code d'accès (écran de l'imprimante). Connecteur non officiel, à adapter selon le modèle.",
+  },
+  {
+    nom: "voiture",
+    libelle: "Voiture (via Home Assistant)",
+    type: "web",
+    url: "http://homeassistant.local:8123/api/mcp",
+    secrets: "Authorization=Bearer ",
+    aide: "La vraie façon de piloter une voiture connectée (verrouillage, climatisation, recharge, position) : branche d'abord ta marque dans Home Assistant (Renault, Tesla, BMW CarData, Stellantis…), puis Home Assistant ici. Pour le diagnostic moteur en direct, Jarvis a déjà la prise OBD (page mécanique).",
+  },
 ];
 
 const VAULT_PREFIX = "MCP:";
