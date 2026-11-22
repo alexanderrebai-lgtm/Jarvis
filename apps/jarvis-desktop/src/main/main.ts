@@ -1,7 +1,6 @@
-import { execFile, spawn } from "node:child_process";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { constants as osConstants, cpus, setPriority, totalmem, uptime } from "node:os";
+import { cpus, totalmem } from "node:os";
 import path from "node:path";
 import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, Notification, powerSaveBlocker, protocol, safeStorage, screen, shell, Tray } from "electron";
 import ffmpegPath from "ffmpeg-static";
@@ -19,17 +18,16 @@ import { PendingActions } from "@muscu/jarvis/src/pending.js";
 import { createWebhookServer } from "@muscu/jarvis/src/server.js";
 import { JsonStore } from "@muscu/jarvis/src/store.js";
 import { parseDeviceList, realTapoDriver, TapoHome } from "@muscu/jarvis/src/tapo.js";
-import { GOOGLE_SCOPES } from "@muscu/jarvis/src/google/client.js";
 import type { ToolContext } from "@muscu/jarvis/src/tools.js";
 import { parseIntent, sayDuration, type Intent } from "../shared/intents.js";
 import { protectedTarget } from "../shared/policy.js";
 import { ConversationWindow, detectWake, wakeVariants } from "../shared/wake.js";
 import { ActionLog, FileVersions, recycleScript, summarizeInput } from "./actions.js";
 import { BackupService, listBackups } from "./backup.js";
-import { Brain, findClaudeExecutable, type BrainReply } from "./brain.js";
+import { Brain, type BrainReply } from "./brain.js";
 import { Budget } from "./budget.js";
 import { jarvisMcpServer, ScreenMap, type DesktopHost, type ScreenShot } from "./desktop-tools.js";
-import { claudeLoginCheck, runChecks, sayDiagnostic, type Check } from "./diagnostic.js";
+import { runChecks, sayDiagnostic } from "./diagnostic.js";
 import { Microcontrollers } from "./electronics.js";
 import { DEFAULT_GAME_PROCESSES, GameWatcher } from "./games.js";
 import { Garage } from "./garage.js";
@@ -46,7 +44,7 @@ import { PageManager } from "./pages/manager.js";
 import { extractionPrompt, Papers, parseExtraction } from "./papers.js";
 import { PerfMonitor } from "./perf.js";
 import { personaPrompt } from "./persona.js";
-import { isTelegramChatId, isTelegramToken, PhoneAlerts } from "./phone.js";
+import { PhoneAlerts } from "./phone.js";
 import { plusMcpServer, type PlusHost } from "./plus-tools.js";
 import { runPowerShell } from "./pc.js";
 import { Pseudonymizer } from "./privacy.js";
@@ -59,19 +57,21 @@ import { deepResearchPrompt, Literature } from "./research/literature.js";
 import { wakeTaskScript, WakeUp } from "./reveil/alarm.js";
 import { parseCodes, PlanningReader, type Shift } from "./reveil/planning.js";
 import { DEFAULT_RULES, parseDays, sayTime } from "./reveil/schedule.js";
-import { SpotifyClient, toSpotifyUri, WAKE_TRACKS, type NowPlaying, type SpotifyTokens } from "./reveil/spotify.js";
+import { SpotifyClient, toSpotifyUri, WAKE_TRACKS, type SpotifyTokens } from "./reveil/spotify.js";
 import { Routines, runRoutine, Timers, type RoutineStep } from "./routines.js";
-import { parseCameras, rtspUrl, SecurityService, type SurveillanceMode } from "./security.js";
+import { parseCameras, SecurityService, type SurveillanceMode } from "./security.js";
 import { elmScript, findElmScript, serialMonitorScript } from "./serial.js";
 import { BackgroundTasks } from "./tasks.js";
-import { explainGoogle, findTelegramChat, googleSignIn, parseEnv, SettingsStore, updateEnvText } from "./settings.js";
-import { openSecrets, sealSecrets, mergeEnvText } from "./secret-backup.js";
+import { SettingsStore } from "./settings.js";
+import { sealSecrets } from "./secret-backup.js";
 import { describeLost, Watchdog } from "./watchdog.js";
+import { createIntentActions } from "./intent-actions.js";
+import { Updates } from "./updates.js";
+import { MusicPanel } from "./music-panel.js";
 import { createPcCare } from "./pc-care.js";
 import { createSettingActions } from "./settings-actions.js";
 import { createDiagnostics } from "./diagnostic-checks.js";
-import { buildProfile, describeProfile, tune } from "./hardware.js";
-import { analyzeHealth, collectHealth, GameRecorder, HEALTH_ACTIONS, healthReport, healthSummaryForWeb, runHealthAction, type Finding, type HealthActionId, type HealthRaw } from "./pc-health.js";
+import { buildProfile, tune } from "./hardware.js";
 import { resilientFetch } from "./net-fetch.js";
 import { dpapiCipher, isLegacyVault, migrateEnvSecrets, migrateLegacyVault, Vault } from "./vault.js";
 import { Veille } from "./veille.js";
@@ -797,39 +797,9 @@ const spotifyHelpers: PlusHost["spotify"] = {
   },
 };
 
-// ---------- Module Musique de l'accueil ----------
+// ---------- Module Musique de l'accueil (voir music-panel.ts) ----------
 
-let nowPlaying: NowPlaying & { relie: boolean; erreur?: string } = { actif: false, relie: false };
-
-let musicFailures = 0;
-async function refreshMusic(): Promise<typeof nowPlaying> {
-  if (!spotify.connected) nowPlaying = { actif: false, relie: false };
-  else {
-    try {
-      nowPlaying = { ...(await spotify.nowPlaying()), relie: true };
-      musicFailures = 0;
-    } catch (error) {
-      // Un raté réseau passager ne vide pas le module : on garde le dernier titre et on ne prévient qu'après trois échecs.
-      musicFailures += 1;
-      const message = error instanceof Error ? error.message : String(error);
-      if (musicFailures >= 3 || !nowPlaying.relie) nowPlaying = { actif: false, relie: true, erreur: message };
-    }
-  }
-  pages.broadcast("musique:etat", nowPlaying, "accueil");
-  return nowPlaying;
-}
-
-async function musicCommand(payload: { action: "lecture" | "pause" | "suivant" | "precedent" | "volume"; valeur?: number }): Promise<typeof nowPlaying> {
-  try {
-    if (payload.action === "lecture") await spotify.play({ ...(spotifyDevice ? { deviceId: spotifyDevice } : {}) }).catch(async () => spotifyHelpers.play());
-    else if (payload.action === "volume") await spotify.volume(payload.valeur ?? 50, spotifyDevice);
-    else await spotifyHelpers.control(payload.action);
-  } catch (error) {
-    nowPlaying = { ...nowPlaying, erreur: error instanceof Error ? error.message : String(error) };
-  }
-  await new Promise((r) => setTimeout(r, 350));
-  return refreshMusic();
-}
+const music = new MusicPanel({ spotify, helpers: spotifyHelpers, device: () => spotifyDevice, publish: (state) => pages.broadcast("musique:etat", state, "accueil") });
 
 const planning = new PlanningReader({
   file: () => env("PLANNING_FICHIER"),
@@ -1289,154 +1259,15 @@ function handlePageCommand(command: string): boolean {
 }
 
 /** Réflexes : exécutés sur le PC sans passer par Claude. Renvoie faux si l'intention n'est pas permise. */
-async function runIntent(intent: Intent, trust: "proprietaire" | "inconnu"): Promise<boolean> {
-  const guestOk = ["heure", "date", "minuteur", "minuteurs", "musique"].includes(intent.type) || (intent.type === "lumiere" && env("VOIX_INVITES_MAISON") === "true") || (intent.type === "reveil" && ["debout", "repousser", "quand"].includes(intent.action));
-  if (trust === "inconnu" && !guestOk) {
-    reply("Je ne reconnais pas ta voix : je ne peux pas faire ça.");
-    return true;
-  }
-  try {
-    switch (intent.type) {
-      case "heure":
-        reply(`Il est ${sayTime(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }))}.`);
-        return true;
-      case "date":
-        reply(`Nous sommes le ${new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}.`);
-        return true;
-      case "lumiere": {
-        if (!tapo) return false;
-        const results = await tapo.command(intent.cible, { ...(intent.action ? { action: intent.action } : {}), ...(intent.luminosite ? { luminosite: intent.luminosite } : {}), ...(intent.couleur ? { couleur: intent.couleur } : {}) });
-        const failed = results.filter((r) => !r.ok);
-        reply(failed.length ? `${failed.map((f) => f.nom).join(", ")} ne répond pas.` : "C'est fait.");
-        void sendPageData("accueil");
-        return true;
-      }
-      case "musique": {
-        if (!spotify.connected) {
-          reply("Spotify n'est pas encore relié. Dis « connecte Spotify ».");
-          return true;
-        }
-        if (intent.action === "reveil") reply(await playWakePlaylist());
-        else if (intent.action === "lecture") reply(await spotifyHelpers.play(intent.requete));
-        else if (intent.action === "volume") {
-          const current = intent.delta ? ((await spotify.current().catch(() => undefined))?.volume ?? 50) : 0;
-          await spotify.volume(intent.volume ?? current + (intent.delta ?? 0), spotifyDevice);
-        } else await spotifyHelpers.control(intent.action === "suivant" ? "suivant" : intent.action === "precedent" ? "precedent" : "pause");
-        return true;
-      }
-      case "minuteur":
-        timers.add(intent.secondes, intent.libelle);
-        reply(`Minuteur de ${sayDuration(intent.secondes)}${intent.libelle ? ` pour ${intent.libelle}` : ""}.`);
-        return true;
-      case "minuteur_annuler":
-        reply(timers.cancelAll() ? "Minuteur annulé." : "Aucun minuteur en cours.");
-        return true;
-      case "minuteurs": {
-        const list = timers.list();
-        reply(list.length ? list.map((t) => `${t.libelle ? `${t.libelle} : ` : ""}encore ${sayDuration(t.resteSecondes)}`).join(". ") : "Aucun minuteur en cours.");
-        return true;
-      }
-      case "rappel":
-        notes.add(intent.texte, ["rappel"], new Date(Date.now() + intent.dans * 1000).toISOString());
-        reply(`Je te le rappelle dans ${sayDuration(intent.dans)}.`);
-        return true;
-      case "reveil":
-        return runAlarmIntent(intent);
-      case "surveillance":
-        setSurveillance(intent.mode);
-        reply({ off: "Surveillance désactivée.", simple: "Surveillance activée.", complete: "Surveillance complète. Je ne quitte pas les caméras des yeux." }[intent.mode]);
-        return true;
-      case "ne_pas_deranger":
-        setFlag("doNotDisturb", intent.actif);
-        reply(intent.actif ? "Je me fais discrète." : "Je suis de nouveau là.");
-        return true;
-      case "mentor":
-        learning.setMode(intent.mode);
-        reply({ fais: "D'accord, je fais à ta place.", avec: "D'accord, on le fait ensemble, étape par étape.", guide: "D'accord. Je te guide, mais c'est toi qui fais." }[intent.mode]);
-        void sendPageData("accueil");
-        return true;
-      case "voix":
-        if (intent.action === "apprendre") {
-          const phrases = voiceLock.startEnrollment();
-          reply(`D'accord. Répète après moi, une phrase à la fois, sans dire « Jarvis » avant. Première phrase : ${phrases[0]}`);
-          enrollIndex = 0;
-        } else if (intent.action === "oublier") {
-          voiceLock.forget();
-          reply("J'ai oublié ta voix. N'importe qui peut à nouveau me commander.");
-        } else reply(voiceLock.enrolled ? "Oui, je connais ta voix." : "Pas encore. Dis « apprends ma voix ».");
-        return true;
-      case "spotify":
-        reply("J'ouvre la page de connexion Spotify dans ton navigateur.");
-        reply(await spotifyHelpers.connect());
-        return true;
-      case "demonstration":
-        if (intent.action === "debut") {
-          const name = intent.nom || `procédure du ${new Date().toLocaleDateString("fr-FR")}`;
-          procedures.start(name);
-          reply(`Je regarde. Montre-moi comment ${name}, et commente si tu veux. Dis « c'est fini » quand tu as terminé.`);
-        } else {
-          const rec = procedures.stop();
-          if (!rec) {
-            reply("Je n'enregistrais rien.");
-            return true;
-          }
-          reply("C'est noté. J'écris la procédure.");
-          void askBrain(procedurePrompt(rec), "clavier", "proprietaire");
-        }
-        return true;
-      case "sauvegarde":
-        reply("Je lance la sauvegarde.");
-        void backups.run().then((r) => r && reply(`Sauvegarde terminée : ${r.fichiers} fichiers.`)).catch((e) => reply(`La sauvegarde a échoué : ${e instanceof Error ? e.message : e}.`));
-        return true;
-    }
-  } catch (error) {
-    reply(`Je n'y arrive pas : ${error instanceof Error ? error.message : String(error)}`);
-    return true;
-  }
-  return false;
-}
-
-async function runAlarmIntent(intent: Extract<Intent, { type: "reveil" }>): Promise<boolean> {
-  if (!wake) {
-    reply("Le réveil est désactivé dans les réglages (REVEIL=off).");
-    return true;
-  }
-  switch (intent.action) {
-    case "debout":
-      if (!(await wake.confirmAwake())) reply("Je ne sonnais pas, mais bonjour quand même.");
-      return true;
-    case "repousser":
-      if (await wake.snooze(intent.minutes ?? 9)) reply(`Très bien. Je reviens dans ${intent.minutes ?? 9} minutes.`);
-      else reply("Le réveil ne sonne pas.");
-      return true;
-    case "arreter":
-      reply((await wake.dismiss()) ? "Réveil arrêté." : "Le réveil ne sonne pas.");
-      return true;
-    case "aucun": {
-      const date = intent.jour === "aujourdhui" ? wake.today() : wake.tomorrow();
-      await wake.setOverride({ date, aucun: true });
-      reply(intent.jour === "aujourdhui" ? "Pas de réveil aujourd'hui." : "Pas de réveil demain. Profite.");
-      return true;
-    }
-    case "regler": {
-      const date = intent.jour === "aujourdhui" ? wake.today() : wake.tomorrow();
-      await wake.setOverride({ date, heure: intent.heure! });
-      reply(`Réveil ${intent.jour === "aujourdhui" ? "aujourd'hui" : "demain"} à ${sayTime(intent.heure!)}.`);
-      return true;
-    }
-    case "quand": {
-      const next = await wake.refresh();
-      reply(next ? `Je te réveille ${next.date === wake.tomorrow() ? "demain" : next.date === wake.today() ? "aujourd'hui" : `le ${new Date(`${next.date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric" })}`} à ${sayTime(next.heure)} : ${next.raison}.` : "Aucun réveil prévu dans les prochains jours.");
-      return true;
-    }
-    case "essai":
-      reply("Essai du réveil.");
-      await wake.test();
-      return true;
-  }
+// Réflexes (demandes simples exécutées sans Claude) : voir intent-actions.ts
+function runIntent(intent: Intent, trust: "proprietaire" | "inconnu"): Promise<boolean> {
+  return intentActions.runIntent(intent, trust);
 }
 
 let enrollIndex = 0;
+function resetEnrollIndex(): void {
+  enrollIndex = 0;
+}
 
 async function handleCommand(text: string, source: "voix" | "clavier", trust: "proprietaire" | "inconnu" = "proprietaire"): Promise<void> {
   const command = text.trim();
@@ -1728,8 +1559,8 @@ ipcMain.handle("journal:lire", (_event, date?: string) => {
     : [];
   return { jours, jour, entrees: actions.day(jour).map((e) => ({ ...e, resume: unmask(e.resume) })).reverse(), erreurs, enPanne: [...watchdog.down] };
 });
-ipcMain.handle("musique:etat", () => refreshMusic());
-ipcMain.handle("musique:commande", (_event, payload: Parameters<typeof musicCommand>[0]) => musicCommand(payload));
+ipcMain.handle("musique:etat", () => music.refresh());
+ipcMain.handle("musique:commande", (_event, payload: Parameters<MusicPanel["command"]>[0]) => music.command(payload));
 
 ipcMain.handle("disposition:appliquer", (_event, name: string) => applyDisposition(name, false));
 
@@ -1765,56 +1596,10 @@ async function chooseSpeechModel(): Promise<void> {
   }
 }
 
-/**
- * Mises à jour : la version installée vérifie toutes les 6 heures les nouvelles
- * versions publiées sur GitHub (dépôt Jarvis) ou à l'adresse MISE_A_JOUR_URL,
- * les télécharge en arrière-plan et les installe à la fermeture de Jarvis.
- */
-let updateStatus = "Vérification des mises à jour pas encore faite.";
-let updater: (typeof import("electron-updater"))["autoUpdater"] | undefined;
-
-async function setupUpdates(): Promise<void> {
-  if (!app.isPackaged) {
-    updateStatus = "Mode développement : mets à jour avec « git pull » puis « pnpm start ».";
-    return;
-  }
-  // electron-updater est un module CommonJS : selon le chargement, autoUpdater est direct ou sous « default ».
-  const mod = (await import("electron-updater")) as unknown as { autoUpdater?: NonNullable<typeof updater>; default?: { autoUpdater?: NonNullable<typeof updater> } };
-  const autoUpdater = mod.autoUpdater ?? mod.default?.autoUpdater;
-  if (!autoUpdater) {
-    updateStatus = "Impossible de vérifier : module de mise à jour introuvable.";
-    return;
-  }
-  updater = autoUpdater;
-  const url = env("MISE_A_JOUR_URL");
-  if (url) autoUpdater.setFeedURL({ provider: "generic", url });
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.on("update-not-available", () => (updateStatus = `À jour (vérifié à ${new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}).`));
-  autoUpdater.on("download-progress", (p) => (updateStatus = `Téléchargement de la mise à jour : ${Math.round(p.percent)} %.`));
-  autoUpdater.on("update-downloaded", (info) => {
-    updateStatus = `Version ${info.version} prête : elle s'installe au prochain redémarrage de Jarvis.`;
-    host.notify("Mise à jour de Jarvis", `Version ${info.version} prête. Elle s'installera quand tu redémarreras Jarvis (Réglages → Redémarrer).`);
-  });
-  autoUpdater.on("error", (error) => (updateStatus = `Impossible de vérifier : ${/404|private|authentication/i.test(String(error)) ? "le dépôt GitHub de Jarvis est privé (rends-le public, ou règle MISE_A_JOUR_URL)" : String(error).slice(0, 120)}`));
-  void checkUpdates();
-  setInterval(() => void checkUpdates(), 6 * 3_600_000);
-}
-
-async function checkUpdates(announce = false): Promise<string> {
-  if (!updater) {
-    if (announce) reply(updateStatus);
-    return updateStatus;
-  }
-  try {
-    const result = await updater.checkForUpdates();
-    const latest = result?.updateInfo.version;
-    if (latest && latest !== app.getVersion()) updateStatus = `Version ${latest} trouvée, téléchargement en cours.`;
-  } catch {
-    // le message est mis par l'évènement « error »
-  }
-  if (announce) reply(updateStatus);
-  return updateStatus;
+// Mises à jour automatiques : voir updates.ts
+const updates = new Updates({ env, notify: (title, body) => host.notify(title, body), reply: (text) => reply(text) });
+function checkUpdates(announce = false): Promise<string> {
+  return updates.check(announce);
 }
 
 // ---------- Réglages ----------
@@ -1980,8 +1765,8 @@ void app.whenReady().then(async () => {
     setTimeout(() => void checkLastShutdown().catch((e) => console.warn("[santé]", e)), 2 * 60_000);
   }
   // Un souci de mise à jour ne doit jamais empêcher Jarvis de démarrer.
-  void setupUpdates().catch((error) => {
-    updateStatus = `Impossible de vérifier : ${error instanceof Error ? error.message : String(error)}`;
+  void updates.setup().catch((error) => {
+    updates.fail(error);
     console.warn("[mise à jour]", error);
   });
   // Bibliothèque et relevés : un passage au démarrage, puis régulièrement.
@@ -1993,7 +1778,7 @@ void app.whenReady().then(async () => {
   setInterval(() => void sendPageData("accueil"), 60_000);
   // Musique en cours : toutes les 5 secondes quand l'accueil est visible.
   setInterval(() => {
-    if (pages.window("accueil")?.isVisible() && spotify.connected) void refreshMusic();
+    if (pages.window("accueil")?.isVisible() && spotify.connected) void music.refresh();
   }, 5_000);
   setTimeout(() => void runDiagnostic().catch(() => undefined), 45_000);
 
@@ -2037,10 +1822,13 @@ app.on("window-all-closed", () => undefined);
 
 
 
+
+
 /** Services partagés avec les modules de Jarvis (chaque module reçoit seulement ceux dont il a besoin). */
 export interface JarvisServices {
   actions: typeof actions;
   agenda: typeof agenda;
+  askBrain: typeof askBrain;
   backups: typeof backups;
   brain: typeof brain;
   broadcast: typeof broadcast;
@@ -2056,29 +1844,38 @@ export interface JarvisServices {
   hardware: typeof hardware;
   host: typeof host;
   lab: typeof lab;
+  learning: typeof learning;
   library: typeof library;
   localAI: typeof localAI;
   localVoice: typeof localVoice;
   micro: typeof micro;
   movedSecrets: typeof movedSecrets;
+  notes: typeof notes;
   ownerName: typeof ownerName;
   pages: typeof pages;
   perf: typeof perf;
   phone: typeof phone;
   planning: typeof planning;
+  playWakePlaylist: typeof playWakePlaylist;
+  procedures: typeof procedures;
   race: typeof race;
   reply: typeof reply;
+  resetEnrollIndex: typeof resetEnrollIndex;
   say: typeof say;
   secretCopyDate: typeof secretCopyDate;
   security: typeof security;
+  sendPageData: typeof sendPageData;
   senses: typeof senses;
+  setFlag: typeof setFlag;
+  setSurveillance: typeof setSurveillance;
   settings: typeof settings;
   spotify: typeof spotify;
+  spotifyDevice: typeof spotifyDevice;
   spotifyHelpers: typeof spotifyHelpers;
   tapo: typeof tapo;
   tapoCache: typeof tapoCache;
+  timers: typeof timers;
   tuning: typeof tuning;
-  updateStatus: typeof updateStatus;
   updateTray: typeof updateTray;
   vault: typeof vault;
   voice: typeof voice;
@@ -2088,8 +1885,10 @@ export interface JarvisServices {
   workspace: typeof workspace;
 }
 
-const diagnostics = createDiagnostics({ localAI, ears, env, localVoice, voice, voiceLock, agenda, tapo, security, phone, spotify, planning, wake, backups, vault, lab, library, micro, perf, secretCopyDate, senses: () => senses, updateStatus: () => updateStatus, gpuPreferenceNote: () => pcCare.gpuNote(), hardware: () => hardware, tuning: () => tuning, movedSecrets: () => movedSecrets });
+const diagnostics = createDiagnostics({ localAI, ears, env, localVoice, voice, voiceLock, agenda, tapo, security, phone, spotify, planning, wake, backups, vault, lab, library, micro, perf, secretCopyDate, senses: () => senses, updateStatus: () => updates.status, gpuPreferenceNote: () => pcCare.gpuNote(), hardware: () => hardware, tuning: () => tuning, movedSecrets: () => movedSecrets });
 
 const settingActions = createSettingActions({ agenda, backups, checkUpdates, conversation, env, envFile, handleCommand, host, localAI, localVoice, phone, planning, reply, say, settings, spotifyHelpers, tapo, tapoCache, vault, wake, weather, workspace });
 
 const pcCare = createPcCare({ actions, brain, broadcast, config, ears, env, flags, games, host, localAI, localVoice, ownerName, pages, perf, race, updateTray, workspace, hardware: () => hardware, tuning: () => tuning });
+
+const intentActions = createIntentActions({ askBrain, backups, env, learning, notes, playWakePlaylist, procedures, reply, resetEnrollIndex, sendPageData, setFlag, setSurveillance, spotify, spotifyHelpers, tapo, timers, voiceLock, wake, spotifyDevice: () => spotifyDevice });

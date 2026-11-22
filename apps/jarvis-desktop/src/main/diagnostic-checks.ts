@@ -10,7 +10,7 @@ import type { JarvisServices } from "./main.js";
 
 export type DiagnosticsDeps = Pick<JarvisServices, "localAI" | "ears" | "env" | "localVoice" | "voice" | "voiceLock" | "agenda" | "tapo" | "security" | "phone" | "spotify" | "planning" | "wake" | "backups" | "vault" | "lab" | "library" | "micro" | "perf" | "secretCopyDate"> & {
   senses: () => JarvisServices["senses"];
-  updateStatus: () => JarvisServices["updateStatus"];
+  updateStatus: () => string;
   gpuPreferenceNote: () => string;
   hardware: () => JarvisServices["hardware"];
   tuning: () => JarvisServices["tuning"];
