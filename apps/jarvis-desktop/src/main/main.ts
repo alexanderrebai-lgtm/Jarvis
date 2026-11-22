@@ -1,10 +1,8 @@
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { cpus, totalmem } from "node:os";
 import path from "node:path";
 import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, Notification, powerSaveBlocker, protocol, safeStorage, screen, shell, Tray } from "electron";
 import ffmpegPath from "ffmpeg-static";
-import { unzipSync } from "fflate";
 import { WebBrowser } from "@muscu/jarvis/src/browser.js";
 import { readConfig } from "@muscu/jarvis/src/config.js";
 import { AgendaService } from "@muscu/jarvis/src/google/agenda.js";
@@ -20,10 +18,9 @@ import { JsonStore } from "@muscu/jarvis/src/store.js";
 import { parseDeviceList, realTapoDriver, TapoHome } from "@muscu/jarvis/src/tapo.js";
 import type { ToolContext } from "@muscu/jarvis/src/tools.js";
 import { parseIntent, sayDuration, type Intent } from "../shared/intents.js";
-import { protectedTarget } from "../shared/policy.js";
 import { ConversationWindow, detectWake, wakeVariants } from "../shared/wake.js";
-import { ActionLog, FileVersions, recycleScript, summarizeInput } from "./actions.js";
-import { BackupService, listBackups } from "./backup.js";
+import { ActionLog, FileVersions, summarizeInput } from "./actions.js";
+import { BackupService } from "./backup.js";
 import { Brain, type BrainReply } from "./brain.js";
 import { Budget } from "./budget.js";
 import { jarvisMcpServer, ScreenMap, type DesktopHost, type ScreenShot } from "./desktop-tools.js";
@@ -48,7 +45,7 @@ import { PhoneAlerts } from "./phone.js";
 import { plusMcpServer, type PlusHost } from "./plus-tools.js";
 import { runPowerShell } from "./pc.js";
 import { Pseudonymizer } from "./privacy.js";
-import { procedurePrompt, Procedures } from "./procedures.js";
+import { Procedures } from "./procedures.js";
 import { insideProject, ProjectView } from "./project-view.js";
 import { Proactive } from "./proactive.js";
 import type { Verbosity } from "./racing/engineer.js";
@@ -56,15 +53,17 @@ import { RaceManager } from "./racing/manager.js";
 import { deepResearchPrompt, Literature } from "./research/literature.js";
 import { wakeTaskScript, WakeUp } from "./reveil/alarm.js";
 import { parseCodes, PlanningReader, type Shift } from "./reveil/planning.js";
-import { DEFAULT_RULES, parseDays, sayTime } from "./reveil/schedule.js";
+import { DEFAULT_RULES, parseDays } from "./reveil/schedule.js";
 import { SpotifyClient, toSpotifyUri, WAKE_TRACKS, type SpotifyTokens } from "./reveil/spotify.js";
-import { Routines, runRoutine, Timers, type RoutineStep } from "./routines.js";
+import { Routines, Timers } from "./routines.js";
 import { parseCameras, SecurityService, type SurveillanceMode } from "./security.js";
-import { elmScript, findElmScript, serialMonitorScript } from "./serial.js";
+import { elmScript, findElmScript } from "./serial.js";
 import { BackgroundTasks } from "./tasks.js";
 import { SettingsStore } from "./settings.js";
 import { sealSecrets } from "./secret-backup.js";
 import { describeLost, Watchdog } from "./watchdog.js";
+import { connectPlusHost } from "./plus-host.js";
+import { createRoutineRunner } from "./routine-runner.js";
 import { createIntentActions } from "./intent-actions.js";
 import { Updates } from "./updates.js";
 import { MusicPanel } from "./music-panel.js";
@@ -78,7 +77,6 @@ import { Veille } from "./veille.js";
 import { Ears, isInterruption, pickSpeechModel, SentenceSplitter, Voice, DEFAULT_VOICE } from "./voice.js";
 import { ENROLL_PHRASES, VoiceLock, wavlmEmbedder } from "./voiceprint.js";
 import { WeatherService } from "./weather.js";
-import { readWorkFile, unmaskWorkFile } from "./workfiles.js";
 
 // ---------- Fichiers et réglages ----------
 
@@ -369,6 +367,12 @@ function verifyPerson(jpeg: Buffer): Promise<boolean | undefined> {
 
 /** Début du mode absent (surveillance complète), pour le résumé au retour. */
 let absentSince: number | undefined;
+/** Début de l'absence, remis à zéro une fois lu (résumé du retour). */
+function takeAbsentSince(): number | undefined {
+  const since = absentSince;
+  absentSince = undefined;
+  return since;
+}
 function setSurveillance(mode: SurveillanceMode): void {
   if (mode === "complete" && security.mode !== "complete") absentSince = Date.now();
   security.mode = mode;
@@ -969,76 +973,9 @@ const timers = new Timers(config.dataDir, (timer) => {
   host.notify("Minuteur", timer.libelle ?? sayDuration(timer.duree));
 });
 
-async function summaryFor(quoi: "demain" | "journee" | "absence"): Promise<string> {
-  if (quoi === "demain") {
-    const next = wake ? await wake.refresh() : undefined;
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(0, 0, 0, 0);
-    const end = new Date(tomorrow);
-    end.setHours(23, 59, 59);
-    const events = (await agenda?.list(tomorrow, end).catch(() => [])) ?? [];
-    const first = events.find((e) => !e.allDay);
-    return [next ? `Réveil ${next.date === wake!.tomorrow() ? "demain" : `le ${next.date}`} à ${sayTime(next.heure)} (${next.raison}).` : "Pas de réveil prévu demain.", first ? `Premier rendez-vous : ${first.summary} à ${new Date(first.start).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}.` : "", "Bonne nuit."].filter(Boolean).join(" ");
-  }
-  if (quoi === "absence") {
-    const since = absentSince ?? Date.now() - 12 * 3_600_000;
-    absentSince = undefined;
-    const motions = security.events.filter((e) => new Date(e.instant).getTime() > since && e.personne !== false);
-    return motions.length ? `Pendant ton absence : ${motions.length} mouvement${motions.length > 1 ? "s" : ""}, le dernier sur la caméra ${motions[0]!.camera} à ${new Date(motions[0]!.instant).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}. Les images sont sur la page Sécurité.` : "Rien à signaler pendant ton absence. Bon retour.";
-  }
-  return `Aujourd'hui : ${actions.day().filter((a) => a.autorise).length} actions de ma part.`;
-}
-
-async function runStep(step: RoutineStep): Promise<string | void> {
-  switch (step.type) {
-    case "lumieres":
-      if (!tapo) return;
-      await tapo.command(step.cible, { ...(step.action ? { action: step.action } : {}), ...(step.luminosite ? { luminosite: step.luminosite } : {}), ...(step.couleur ? { couleur: step.couleur } : {}) });
-      return;
-    case "surveillance":
-      setSurveillance(step.mode);
-      return;
-    case "disposition":
-      applyDisposition(step.nom, false);
-      return;
-    case "pages":
-      pages.closeAll();
-      return;
-    case "dire":
-      return step.texte;
-    case "ne_pas_deranger":
-      setFlag("doNotDisturb", step.actif);
-      return;
-    case "musique":
-      if (!spotify.connected) return;
-      if (step.action === "pause") await spotify.pause();
-      else if (step.action === "reveil") await playWakePlaylist();
-      else await spotifyHelpers.play(step.requete);
-      return;
-    case "resume":
-      return summaryFor(step.quoi);
-    case "ecrans_veille":
-      if (process.platform === "win32") setTimeout(() => void runPowerShell("(Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern int SendMessage(int h,int m,int w,int l);' -Name S -Namespace W -PassThru)::SendMessage(0xFFFF,0x0112,0xF170,2)", 10_000), 8_000);
-      return;
-    case "telephone":
-      if (phone.enabled) await phone.text(`Jarvis : ${step.texte} (${new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })})`);
-      return;
-    case "attendre":
-      return;
-  }
-}
-
-async function launchRoutine(name: string): Promise<string> {
-  const routine = routines.get(name) ?? routines.match(name);
-  if (!routine) return `Je ne connais pas la routine « ${name} ».`;
-  let spoke = false;
-  const result = await runRoutine(routine, runStep, (text) => {
-    spoke = true;
-    reply(text);
-  });
-  actions.add({ outil: "routine", resume: routine.nom, autorise: true });
-  return [...result.faits, ...(result.erreurs.length ? [`(Souci : ${result.erreurs.join(" ; ")})`] : [])].join(" ") || (spoke ? "" : "C'est fait.");
+// Exécution des routines : voir routine-runner.ts
+function launchRoutine(name: string): Promise<string> {
+  return routineRunner.launchRoutine(name);
 }
 
 function applyDisposition(name: string, speak = true): string {
@@ -1120,75 +1057,7 @@ function secretCopyDate(): string | undefined {
 
 // ---------- Hôte des outils supplémentaires ----------
 
-plusHostRef.current = {
-  workspace,
-  dispositions,
-  applyDisposition: (nom) => applyDisposition(nom, false),
-  saveCurrentDisposition: (nom) => {
-    const current = pages.current();
-    if (!current.length) return "Aucune page n'est ouverte : ouvre d'abord les pages à enregistrer.";
-    const saved = dispositions.save({ nom, pages: current.slice(0, 3).map((p) => ({ page: p.page, ecran: p.ecran === "principal" ? "centre" : p.ecran })) });
-    updateTray();
-    return `Disposition « ${saved.nom} » enregistrée : ${saved.pages.map((p) => `${pageInfo(p.page).titre} à ${p.ecran}`).join(", ")}.`;
-  },
-  wake: wake ?? (null as unknown as WakeUp),
-  spotify: spotifyHelpers,
-  tasks,
-  launchTask: (titre, consigne, page) => tasks.launch(titre, mask(consigne), page).id,
-  launchResearch,
-  literature,
-  library,
-  learning,
-  lab,
-  veille,
-  routines,
-  runRoutine: launchRoutine,
-  timers: { add: (s, l) => `Minuteur ${timers.add(s, l).id} lancé.`, list: () => timers.list() },
-  garage,
-  obd,
-  findObd,
-  procedures,
-  runProcedure: (nom, parametres) => {
-    const text = procedures.read(nom);
-    if (!text) throw new Error(`Procédure « ${nom} » inconnue.`);
-    return tasks.launch(`Procédure : ${nom}`, `Refais cette procédure qu'${ownerName} t'a apprise, sur son PC, avec les outils pc_* et des captures d'écran (ecran_capture avant chaque clic, vérification après). Préfère les raccourcis et les commandes aux clics.${parametres ? `\nParamètres du jour : ${parametres}` : ""}\n\n${text}`).id;
-  },
-  localAI,
-  micro,
-  serialMonitor: async (port, baud, seconds, send) => (await runPowerShell(serialMonitorScript(port, baud, seconds, send), (seconds + 15) * 1000)).stdout,
-  budget,
-  papers,
-  actions,
-  versions,
-  recycle: async (paths) => {
-    const bad = paths.find(protectedTarget);
-    if (bad) throw new Error(`${bad} est protégé.`);
-    if (process.platform !== "win32") throw new Error("La corbeille de Windows n'existe que sous Windows.");
-    const r = await runPowerShell(recycleScript(paths), 60_000);
-    return r.stdout.trim() || r.stderr.trim();
-  },
-  readWorkFile: (file, feuille) => readWorkFile(path.resolve(workFolder, file), privacy, feuille),
-  unmaskFile: (file) => unmaskWorkFile(path.resolve(workspace, file), privacy),
-  backups,
-  listBackups: () => listBackups(path.join(workspace, "sauvegardes")).slice(0, 30),
-  restoreFromBackup: async (archive, entry, destination) => {
-    const file = path.resolve(path.join(workspace, "sauvegardes"), archive);
-    if (!file.startsWith(path.join(workspace, "sauvegardes"))) throw new Error("Archive hors du dossier des sauvegardes.");
-    const files = unzipSync(new Uint8Array(await readFile(file)), { filter: (f) => f.name === entry });
-    const data = files[entry];
-    if (!data) throw new Error(`« ${entry} » n'est pas dans cette archive.`);
-    mkdirSync(destination, { recursive: true });
-    const target = path.join(destination, path.basename(entry));
-    if (existsSync(target)) versions.snapshot(target);
-    writeFileSync(target, data);
-    return `Restauré dans ${target}.`;
-  },
-  diagnostic: () => runDiagnostic(),
-  showImage: async (titre, file, page) => {
-    const ext = path.extname(file).toLowerCase().replace(".", "") || "png";
-    showPanel({ titre, imageDataUrl: `data:image/${ext === "jpg" ? "jpeg" : ext};base64,${(await readFile(file)).toString("base64")}`, ...(page ? { page } : {}) });
-  },
-};
+// Outils supplémentaires de Claude (hôte) : voir plus-host.ts
 
 // ---------- Veilleur des connexions ----------
 
@@ -1824,43 +1693,59 @@ app.on("window-all-closed", () => undefined);
 
 
 
+
 /** Services partagés avec les modules de Jarvis (chaque module reçoit seulement ceux dont il a besoin). */
 export interface JarvisServices {
   actions: typeof actions;
   agenda: typeof agenda;
+  applyDisposition: typeof applyDisposition;
   askBrain: typeof askBrain;
   backups: typeof backups;
   brain: typeof brain;
   broadcast: typeof broadcast;
+  budget: typeof budget;
   checkUpdates: typeof checkUpdates;
   config: typeof config;
   conversation: typeof conversation;
+  dispositions: typeof dispositions;
   ears: typeof ears;
   env: typeof env;
   envFile: typeof envFile;
+  findObd: typeof findObd;
   flags: typeof flags;
   games: typeof games;
+  garage: typeof garage;
   handleCommand: typeof handleCommand;
   hardware: typeof hardware;
   host: typeof host;
   lab: typeof lab;
+  launchResearch: typeof launchResearch;
+  launchRoutine: typeof launchRoutine;
   learning: typeof learning;
   library: typeof library;
+  literature: typeof literature;
   localAI: typeof localAI;
   localVoice: typeof localVoice;
+  mask: typeof mask;
   micro: typeof micro;
   movedSecrets: typeof movedSecrets;
   notes: typeof notes;
+  obd: typeof obd;
   ownerName: typeof ownerName;
   pages: typeof pages;
+  papers: typeof papers;
   perf: typeof perf;
   phone: typeof phone;
   planning: typeof planning;
   playWakePlaylist: typeof playWakePlaylist;
+  plusHostRef: typeof plusHostRef;
+  privacy: typeof privacy;
   procedures: typeof procedures;
   race: typeof race;
   reply: typeof reply;
   resetEnrollIndex: typeof resetEnrollIndex;
+  routines: typeof routines;
+  runDiagnostic: typeof runDiagnostic;
   say: typeof say;
   secretCopyDate: typeof secretCopyDate;
   security: typeof security;
@@ -1869,19 +1754,25 @@ export interface JarvisServices {
   setFlag: typeof setFlag;
   setSurveillance: typeof setSurveillance;
   settings: typeof settings;
+  showPanel: typeof showPanel;
   spotify: typeof spotify;
   spotifyDevice: typeof spotifyDevice;
   spotifyHelpers: typeof spotifyHelpers;
+  takeAbsentSince: typeof takeAbsentSince;
   tapo: typeof tapo;
   tapoCache: typeof tapoCache;
+  tasks: typeof tasks;
   timers: typeof timers;
   tuning: typeof tuning;
   updateTray: typeof updateTray;
   vault: typeof vault;
+  veille: typeof veille;
+  versions: typeof versions;
   voice: typeof voice;
   voiceLock: typeof voiceLock;
   wake: typeof wake;
   weather: typeof weather;
+  workFolder: typeof workFolder;
   workspace: typeof workspace;
 }
 
@@ -1892,3 +1783,7 @@ const settingActions = createSettingActions({ agenda, backups, checkUpdates, con
 const pcCare = createPcCare({ actions, brain, broadcast, config, ears, env, flags, games, host, localAI, localVoice, ownerName, pages, perf, race, updateTray, workspace, hardware: () => hardware, tuning: () => tuning });
 
 const intentActions = createIntentActions({ askBrain, backups, env, learning, notes, playWakePlaylist, procedures, reply, resetEnrollIndex, sendPageData, setFlag, setSurveillance, spotify, spotifyHelpers, tapo, timers, voiceLock, wake, spotifyDevice: () => spotifyDevice });
+
+const routineRunner = createRoutineRunner({ actions, agenda, applyDisposition, pages, phone, playWakePlaylist, reply, routines, security, setFlag, setSurveillance, spotify, spotifyHelpers, takeAbsentSince, tapo, wake });
+
+connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace });

@@ -530,3 +530,23 @@ src/renderer/senses.ts     Micro, claquements, voix, sonnerie, webcams, gestes, 
 `pnpm dist` fabrique l'installateur Windows (sous Windows). Le workflow `.github/workflows/jarvis-windows.yml` le fait sur GitHub.
 
 `pnpm start` assemble et lance Jarvis. `pnpm test` lance les tests, `pnpm typecheck` vérifie les types.
+
+## Organisation du code (processus principal)
+
+`src/main/main.ts` est la colonne vertébrale : il crée les services (vault, réglages, cerveau, voix, oreilles, maison, pages…), relie les messages de l'interface et lance Jarvis. Les grandes fonctions vivent dans des modules qui reçoivent explicitement les services dont ils ont besoin (interface `JarvisServices`) :
+
+| Module | Rôle |
+| --- | --- |
+| `diagnostic-checks.ts` | contrôles de la page Diagnostic |
+| `settings-actions.ts` | boutons de la page Réglages (tester, connecter, installer, restaurer) |
+| `pc-care.ts` | santé du PC, puce graphique de l'interface, mode jeu |
+| `pc-health.ts` | collecte et analyse de la santé du PC (journaux Windows, carte NVIDIA) |
+| `intent-actions.ts` | réflexes : demandes simples exécutées sans Claude |
+| `routine-runner.ts` | exécution des routines (« bonne nuit », « je pars »…) |
+| `plus-host.ts` | ce que les outils supplémentaires de Claude peuvent faire sur le PC |
+| `updates.ts` | mises à jour automatiques |
+| `music-panel.ts` | module Musique de l'accueil |
+| `hardware.ts` | profil matériel et réglages adaptés au PC |
+| `watchdog.ts` | veilleur des connexions |
+
+Chaque publication passe par : vérification des types, tests, puis lancement réel de Jarvis sous Windows (`JARVIS_TEST_DEMARRAGE`) avant d'être publiée.
