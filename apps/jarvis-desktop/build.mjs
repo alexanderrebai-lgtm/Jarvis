@@ -35,6 +35,20 @@ await build({
   logLevel: "warning",
 });
 
+// Jarvis Mobile : l'application web du téléphone (servie par le PC), légère, sans dépendance.
+mkdirSync(path.join(out, "mobile"), { recursive: true });
+await build({
+  entryPoints: { mobile: "src/mobile/mobile.ts" },
+  outdir: path.join(out, "mobile"),
+  bundle: true,
+  platform: "browser",
+  target: "es2022",
+  format: "iife",
+  minify: true,
+  logLevel: "warning",
+});
+for (const f of ["mobile.html", "mobile.css", "manifest.webmanifest", "icon-180.png", "icon-512.png"]) cpSync(path.join("src/mobile", f), path.join(out, "mobile", f));
+
 cpSync("src/renderer/index.html", path.join(out, "renderer", "index.html"));
 cpSync("src/renderer/styles.css", path.join(out, "renderer", "styles.css"));
 // Polices embarquées (pas de chargement en ligne).

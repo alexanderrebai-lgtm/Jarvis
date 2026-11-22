@@ -70,6 +70,7 @@ import { bilan, capacites, phraseCapacites } from "./capacites.js";
 import { adresseMaison, adresseTailscale } from "./reseau.js";
 import { SatelliteServer } from "./satellite.js";
 import { avecRelecture, promptRelecteur } from "./relecture.js";
+import { MobileServer, canalAutorise, type Niveau as NiveauMobile } from "./mobile.js";
 import { AmeliorationStore, revue as faireRevue } from "./amelioration.js";
 import { createRoutineRunner } from "./routine-runner.js";
 import { createIntentActions } from "./intent-actions.js";
@@ -677,6 +678,87 @@ async function startSatellite(): Promise<void> {
   });
   const r = await satelliteServer.start();
   if (!r.ok) console.warn("[satellite]", r.message);
+}
+
+// ---------- Jarvis Mobile (l'application web du téléphone) ----------
+
+/** Tous les canaux de l'interface, pour que le téléphone appelle les mêmes (sous liste blanche, voir mobile.ts). */
+const ipcHandlers = new Map<string, (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown>();
+{
+  const original = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = ((channel: string, listener: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown) => {
+    ipcHandlers.set(channel, listener);
+    return original(channel, listener);
+  }) as typeof ipcMain.handle;
+}
+
+let mobileServer: MobileServer | undefined;
+let mobileEcoutesActuelles = "";
+function mobilePort(): number {
+  const p = Number(env("MOBILE_PORT"));
+  return Number.isInteger(p) && p > 1024 && p < 65536 ? p : 8894;
+}
+/** Où écouter : sur Tailscale (chiffré, contrôle complet) et, si tu l'autorises, sur le Wi-Fi de la maison (clair, lecture limitée). */
+function mobileEcoutes(): Array<{ host: string; port: number; niveau: NiveauMobile }> {
+  if (env("MOBILE_ACTIF") !== "true") return [];
+  const nets = networks();
+  const port = mobilePort();
+  const out: Array<{ host: string; port: number; niveau: NiveauMobile }> = [];
+  const ts = adresseTailscale(nets);
+  if (ts) out.push({ host: ts, port, niveau: "chiffre" });
+  const lan = adresseMaison(nets);
+  if (env("MOBILE_RESEAU_MAISON") === "true" && lan) out.push({ host: lan, port, niveau: "maison" });
+  // Essais sur ce PC seulement (développement) : adresse locale, niveau chiffré.
+  if (env("MOBILE_ECOUTE_LOCALE") === "true") out.push({ host: "127.0.0.1", port, niveau: "chiffre" });
+  return out;
+}
+async function refreshMobile(): Promise<void> {
+  const ecoutes = mobileEcoutes();
+  const cle = JSON.stringify(ecoutes);
+  if (cle === mobileEcoutesActuelles && (mobileServer || !ecoutes.length)) return;
+  mobileServer?.stop();
+  mobileServer = undefined;
+  mobileEcoutesActuelles = cle;
+  if (!ecoutes.length) return;
+  mobileServer = new MobileServer({
+    token: secretToken("mobile-jeton"),
+    ecoutes,
+    dossier: path.join(__dirname, "mobile"),
+    version: app.getVersion(),
+    invoke: async (canal, payload) => {
+      const h = ipcHandlers.get(canal);
+      if (!h) throw new Error("Canal inconnu.");
+      if (canalAutorise(canal, "chiffre") === "ecriture") actions.add({ outil: "téléphone", resume: `téléphone : ${canal}`, autorise: true, origine: "téléphone" });
+      return h({} as Electron.IpcMainInvokeEvent, payload);
+    },
+    demander: async (texte, niveau) => {
+      // Sur le Wi-Fi en clair : questions seulement (même règle qu'une voix inconnue).
+      const r = await brain.ask(mask(texte), {}, { source: "téléphone", ...(niveau === "maison" ? { trust: "inconnu" as const } : {}) });
+      const reponse = unmask(r.text);
+      journal.add({ demande: `(téléphone) ${unmask(texte)}`, reponse, outils: ["téléphone"] });
+      return reponse;
+    },
+  });
+  const r = await mobileServer.start();
+  if (!r.ok) console.warn("[mobile]", r.message);
+}
+function startMobile(): void {
+  void refreshMobile().catch((e) => console.warn("[mobile]", e));
+  // Tailscale peut démarrer après Jarvis : on revérifie les adresses chaque minute.
+  setInterval(() => void refreshMobile().catch((e) => console.warn("[mobile]", e)), 60_000);
+}
+function mobileLiens(): { actif: boolean; liens: Array<{ niveau: NiveauMobile; url: string }> } {
+  const token = secretToken("mobile-jeton");
+  return { actif: env("MOBILE_ACTIF") === "true", liens: mobileEcoutes().map((e) => ({ niveau: e.niveau, url: `http://${e.host}:${e.port}/?jeton=${token}` })) };
+}
+/** Nouveau jeton : les téléphones déjà appairés sont déconnectés et doivent rouvrir un nouveau lien. */
+async function mobileRenouveler(): Promise<void> {
+  if (vault.available) vault.set("mobile-jeton", undefined);
+  secretCache.delete("mobile-jeton");
+  mobileServer?.stop();
+  mobileServer = undefined;
+  mobileEcoutesActuelles = "";
+  await refreshMobile();
 }
 
 async function startHealth(): Promise<void> {
@@ -2092,6 +2174,7 @@ void app.whenReady().then(async () => {
   startScreenWatch();
   void startHealth();
   void startSatellite();
+  startMobile();
   if (!startupTest) {
     watchdog.start();
     setTimeout(() => void checkLastShutdown().catch((e) => console.warn("[santé]", e)), 2 * 60_000);
@@ -2133,6 +2216,7 @@ app.on("will-quit", () => {
   recall?.stop();
   healthServer?.stop();
   satelliteServer?.stop();
+  mobileServer?.stop();
   globalShortcut.unregisterAll();
   race.stop();
   security.stop();
@@ -2190,6 +2274,8 @@ export interface JarvisServices {
   launchResearch: typeof launchResearch;
   healthConnexion: typeof healthConnexion;
   satelliteConnexion: typeof satelliteConnexion;
+  mobileLiens: typeof mobileLiens;
+  mobileRenouveler: typeof mobileRenouveler;
   launchRoutine: typeof launchRoutine;
   learning: typeof learning;
   library: typeof library;
@@ -2250,7 +2336,7 @@ export interface JarvisServices {
 
 const diagnostics = createDiagnostics({ localAI, ears, env, localVoice, voice, voiceLock, agenda, tapo, security, phone, spotify, planning, wake, backups, vault, lab, library, micro, perf, secretCopyDate, wakeWordStatus, senses: () => senses, updateStatus: () => updates.status, gpuPreferenceNote: () => pcCare.gpuNote(), hardware: () => hardware, tuning: () => tuning, movedSecrets: () => movedSecrets });
 
-const settingActions = createSettingActions({ healthConnexion, satelliteConnexion, agenda, backups, checkUpdates, conversation, env, envFile, handleCommand, host, localAI, localVoice, phone, planning, reply, say, settings, spotifyHelpers, tapo, tapoCache, vault, wake, weather, workspace });
+const settingActions = createSettingActions({ healthConnexion, satelliteConnexion, mobileLiens, mobileRenouveler, agenda, backups, checkUpdates, conversation, env, envFile, handleCommand, host, localAI, localVoice, phone, planning, reply, say, settings, spotifyHelpers, tapo, tapoCache, vault, wake, weather, workspace });
 
 const pcCare = createPcCare({ actions, brain, broadcast, config, ears, env, flags, games, host, localAI, localVoice, ownerName, pages, perf, race, updateTray, workspace, hardware: () => hardware, tuning: () => tuning });
 

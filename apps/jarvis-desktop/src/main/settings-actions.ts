@@ -16,10 +16,10 @@ import type { JarvisServices } from "./main.js";
  * Boutons de la page Réglages : tester la météo, les ampoules, les caméras, Telegram ; connecter Google, Spotify, Claude ; installer la voix locale ; sauvegarder, restaurer, chercher une mise à jour.
  */
 
-export type SettingActionsDeps = Pick<JarvisServices, "healthConnexion" | "satelliteConnexion" | "agenda" | "backups" | "checkUpdates" | "conversation" | "env" | "envFile" | "handleCommand" | "host" | "localAI" | "localVoice" | "phone" | "planning" | "reply" | "say" | "settings" | "spotifyHelpers" | "tapo" | "tapoCache" | "vault" | "wake" | "weather" | "workspace">;
+export type SettingActionsDeps = Pick<JarvisServices, "healthConnexion" | "satelliteConnexion" | "mobileLiens" | "mobileRenouveler" | "agenda" | "backups" | "checkUpdates" | "conversation" | "env" | "envFile" | "handleCommand" | "host" | "localAI" | "localVoice" | "phone" | "planning" | "reply" | "say" | "settings" | "spotifyHelpers" | "tapo" | "tapoCache" | "vault" | "wake" | "weather" | "workspace">;
 
 export function createSettingActions(d: SettingActionsDeps) {
-  const { healthConnexion, satelliteConnexion, agenda, backups, checkUpdates, conversation, env, envFile, handleCommand, host, localAI, localVoice, phone, planning, reply, say, settings, spotifyHelpers, tapo, tapoCache, vault, wake, weather, workspace } = d;
+  const { healthConnexion, satelliteConnexion, mobileLiens, mobileRenouveler, agenda, backups, checkUpdates, conversation, env, envFile, handleCommand, host, localAI, localVoice, phone, planning, reply, say, settings, spotifyHelpers, tapo, tapoCache, vault, wake, weather, workspace } = d;
   /** Une image d'une caméra (pour le bouton « Tester »). */
   function grabCameraFrame(ip: string, user: string, password: string): Promise<string | undefined> {
     const bin = (ffmpegPath as unknown as string | null) ?? undefined;
@@ -164,6 +164,20 @@ export function createSettingActions(d: SettingActionsDeps) {
           if (!c.active) return { ok: false, message: "La réception est désactivée : mets « Oui » à « Recevoir mes données de santé », enregistre, puis redémarre Jarvis." };
           return { ok: true, message: `Jarvis a ouvert une « boîte aux lettres » sur ton PC. Adresse : ${c.url} — Code (à mettre dans l'en-tête « x-jeton ») : ${c.jeton}. Une appli du téléphone doit y déposer les données de ta montre : le guide pas à pas est sur la page « Ma forme ». Le téléphone doit être sur le même Wi-Fi que le PC.${c.urlDistante ? ` Hors de la maison (Tailscale) : ${c.urlDistante}.` : ""}` };
         }
+        case "mobile-lien":
+        case "mobile-telegram": {
+          const c = mobileLiens();
+          if (!c.actif) return { ok: false, message: "Jarvis Mobile est désactivé : mets « Oui » à « Activer Jarvis Mobile », enregistre, puis réessaie (pris en compte en moins d'une minute)." };
+          if (!c.liens.length) return { ok: false, message: "Aucune adresse disponible. Installe Tailscale sur le PC et le téléphone (même compte) : c'est ce qui donne le contrôle complet. Ou autorise le Wi-Fi de la maison (lecture limitée), enregistre, et réessaie." };
+          const texte = c.liens.map((l) => `${l.niveau === "chiffre" ? "🔒 Connexion chiffrée (Tailscale), contrôle complet" : "📶 Wi-Fi de la maison, lecture limitée"} :\n${l.url}`).join("\n\n");
+          if (id === "mobile-lien") return { ok: true, message: `Ouvre ce lien sur ton téléphone (une seule fois) : ${c.liens.map((l) => l.url).join("  ·  ")}` };
+          if (!phone.enabled) return { ok: false, message: "Configure d'abord Telegram (groupe « Alertes sur le téléphone ») : Jarvis s'en sert pour t'envoyer le lien. Sinon utilise « Voir le lien »." };
+          await phone.text(`Jarvis Mobile — ouvre ce lien sur ton téléphone, une seule fois (puis « Partager » → « Sur l'écran d'accueil ») :\n\n${texte}\n\nNe le partage avec personne : il donne accès à Jarvis. Tu pourras le renouveler depuis les réglages.`);
+          return { ok: true, message: "Lien envoyé sur Telegram. Ouvre-le sur le téléphone." };
+        }
+        case "mobile-renouveler":
+          await mobileRenouveler();
+          return { ok: true, message: "Nouveau jeton créé : les téléphones déjà appairés sont déconnectés. Envoie-toi le nouveau lien." };
         case "satellite-adresse": {
           const c = satelliteConnexion();
           if (!c.active) return { ok: false, message: "Les satellites sont désactivés : mets « Oui » à « Accepter les micros des autres pièces », enregistre, puis redémarre Jarvis." };

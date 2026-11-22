@@ -201,6 +201,17 @@ export const SETTING_GROUPS: SettingGroup[] = [
     ],
   },
   {
+    id: "mobile",
+    titre: "Téléphone (Jarvis Mobile)",
+    description: "Une application web que ton téléphone ouvre comme une appli : discuter avec Jarvis, voir l'état, piloter la maison, la mémoire, le journal. Le contrôle complet passe par Tailscale (réseau privé chiffré, installé sur le PC et le téléphone). Les réglages, mots de passe et connecteurs ne sont JAMAIS accessibles depuis le téléphone. Pris en compte en moins d'une minute.",
+    champs: [
+      { cle: "MOBILE_ACTIF", libelle: "Activer Jarvis Mobile", type: "choix", options: [{ valeur: "false", libelle: "Non (par défaut)" }, { valeur: "true", libelle: "Oui" }] },
+      { cle: "MOBILE_RESEAU_MAISON", libelle: "Accepter aussi le Wi-Fi de la maison (sans Tailscale)", type: "choix", options: [{ valeur: "false", libelle: "Non : seulement par Tailscale (conseillé)" }, { valeur: "true", libelle: "Oui : lecture limitée et questions seulement" }], aide: "Le Wi-Fi n'est pas chiffré pour cette application : par prudence, dans ce mode le téléphone ne peut ni piloter la maison ni lire ta mémoire ou ton journal. Pour tout faire, utilise Tailscale." },
+      { cle: "MOBILE_PORT", libelle: "Port (avancé)", type: "nombre", exemple: "8894" },
+    ],
+    actions: [{ id: "mobile-telegram", libelle: "Envoyer le lien sur Telegram" }, { id: "mobile-lien", libelle: "Voir le lien d'appairage" }, { id: "mobile-renouveler", libelle: "Renouveler le jeton (déconnecte les téléphones)" }],
+  },
+  {
     id: "satellites",
     titre: "Micros des autres pièces",
     description: "Un micro dans la cuisine ou la chambre (module ESP32, Home Assistant Voice, un téléphone) envoie ce que tu dis à Jarvis et lit sa réponse. Jarvis ne fournit que le cerveau : le micro fait la reconnaissance et la voix. Protégé par un jeton ; par défaut, ces micros ne peuvent que poser des questions.",
