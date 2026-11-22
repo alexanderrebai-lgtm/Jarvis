@@ -40,6 +40,30 @@ export function renderHealth(root: HTMLElement): void {
   const list = panel("Constats et actions", "grow", { icon: ICONS.list, link: false });
   list.body.classList.add("checks");
   center.append(list.root);
+
+  // Onglets : bilan, composants, optimisations.
+  const tabs = el("div", "health-tabs");
+  const componentsBody = el("div", "scroll health-pane hidden");
+  const tuningBody = el("div", "scroll health-pane hidden");
+  list.body.after(componentsBody, tuningBody);
+  list.body.before(tabs);
+  const panes: Record<string, { body: HTMLElement; titre: string; load?: () => Promise<void>; loaded?: boolean }> = {
+    bilan: { body: list.body, titre: "Constats et actions" },
+    composants: { body: componentsBody, titre: "Composants du PC", load: () => loadComponents() },
+    optimisations: { body: tuningBody, titre: "Optimisations", load: () => loadTuning() },
+  };
+  const showTab = (id: string) => {
+    for (const [key, pane] of Object.entries(panes)) pane.body.classList.toggle("hidden", key !== id);
+    tabs.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.tab === id));
+    list.title.querySelector("span:last-child")!.textContent = panes[id]!.titre;
+    const pane = panes[id]!;
+    if (pane.load && !pane.loaded) {
+      pane.loaded = true;
+      void pane.load();
+    }
+  };
+  tabs.innerHTML = [["bilan", "Bilan"], ["composants", "Composants"], ["optimisations", "Optimisations"]].map(([id, label]) => `<button class="chip" data-tab="${id}">${label}</button>`).join("");
+  tabs.querySelectorAll<HTMLButtonElement>("button").forEach((b) => (b.onclick = () => showTab(b.dataset.tab!)));
   const web = panel("Solutions trouvées sur Internet", "grow", { icon: ICONS.book, accent: "gold" });
   right.append(web.root);
   root.append(page);
@@ -105,6 +129,68 @@ export function renderHealth(root: HTMLElement): void {
     search.disabled = false;
   };
 
+  const confirmAction = (message: string) => window.confirm(message);
+  const runAndReport = async (button: HTMLButtonElement, call: () => Promise<{ ok: boolean; message: string }>, after?: () => Promise<void>) => {
+    button.disabled = true;
+    say("En cours… (Windows peut demander une autorisation)");
+    const r = await call();
+    say(r.message, r.ok);
+    button.disabled = false;
+    if (after) await after();
+  };
+
+  interface Component { id: string; titre: string; etat: "ok" | "attention" | "erreur" | "inconnu"; mesures: Array<{ libelle: string; valeur: string; alerte?: boolean }>; constats: string[] }
+  interface Proc { nom: string; id: number; memoireMo: number; fermable: boolean }
+  const loadComponents = async () => {
+    componentsBody.innerHTML = '<div class="empty">Lecture des composants (une vingtaine de secondes)…</div>';
+    const r = await api.invoke<{ rapports: Component[]; processus: Proc[] }>("sante:composants");
+    const stateClass = { ok: "ok", attention: "attention", erreur: "erreur", inconnu: "absent" } as const;
+    componentsBody.innerHTML =
+      `<div class="health-refresh"><button class="health-button" data-reload>Actualiser</button></div>` +
+      r.rapports
+        .map((c) => `<div class="check ${stateClass[c.etat]} component"><h5><i></i>${esc(c.titre)}</h5>${c.mesures.map((m) => `<div class="row"><span>${esc(m.libelle)}</span><span class="v ${m.alerte ? "bad" : ""}">${esc(m.valeur)}</span></div>`).join("")}${c.constats.map((t) => `<p class="tip">${esc(t)}</p>`).join("")}</div>`)
+        .join("") +
+      `<div class="check absent component"><h5><i></i>Programmes les plus gourmands en mémoire</h5>${r.processus.map((p) => `<div class="row"><span>${esc(p.nom)}</span><span class="v">${(p.memoireMo / 1024).toFixed(1).replace(".", ",")} Go ${p.fermable ? `<button class="health-button small" data-close="${p.id}" data-name="${esc(p.nom)}">Fermer</button>` : ""}</span></div>`).join("")}</div>`;
+    componentsBody.querySelector<HTMLButtonElement>("[data-reload]")!.onclick = () => void loadComponents();
+    componentsBody.querySelectorAll<HTMLButtonElement>("[data-close]").forEach((b) => {
+      b.onclick = () => {
+        if (!confirmAction(`Fermer ${b.dataset.name} ? Un travail non enregistré dans ce programme serait perdu.`)) return;
+        void runAndReport(b, () => api.invoke("sante:fermer", { id: Number(b.dataset.close), nom: b.dataset.name }), loadComponents);
+      };
+    });
+  };
+
+  interface TuningItem { id: string; titre: string; description: string; categorie: string; actif: boolean | null; admin: boolean; redemarrage: boolean; ponctuel: boolean; annulable: boolean }
+  interface Startup { nom: string; commande: string; ruche: string; actif: boolean }
+  const loadTuning = async () => {
+    tuningBody.innerHTML = '<div class="empty">Lecture des réglages de Windows…</div>';
+    const st = await api.invoke<{ reglages: TuningItem[]; demarrage: Startup[]; fichierEchangeAuto: boolean | null }>("sante:optimisations");
+    const badge = (t: TuningItem) => (t.ponctuel ? "" : t.actif ? '<span class="tag ok">déjà fait</span>' : '<span class="tag">pas encore</span>');
+    const notes = (t: TuningItem) => [t.admin ? "autorisation Windows" : "", t.redemarrage ? "redémarrage" : ""].filter(Boolean).join(" · ");
+    const groups = new Map<string, TuningItem[]>();
+    for (const t of st.reglages) groups.set(t.categorie, [...(groups.get(t.categorie) ?? []), t]);
+    const power = `<div class="check absent component"><h5><i></i>Puissance et alimentation</h5>
+      <p>Plan d'alimentation et test de la carte graphique (la limite s'annule au redémarrage du PC).</p>
+      <div class="health-actions"><button class="health-button" data-health="plan-performances">Plan « Performances élevées »</button>
+      <button class="health-button" data-health="plan-equilibre">Plan « Utilisation normale »</button>
+      <button class="health-button" data-health="limite-gpu">Limiter la carte graphique à 80 %</button>
+      <button class="health-button" data-health="limite-gpu-defaut">Puissance normale</button>
+      <button class="health-button" data-health="nettoyer-temp">Nettoyer les fichiers temporaires</button></div></div>`;
+    const pagefile = st.fichierEchangeAuto === false ? `<div class="check attention component"><h5><i></i>Fichier d'échange réglé à la main</h5><p>Avec 16 Go de mémoire, un fichier d'échange trop petit peut faire planter les jeux. Le plus sûr : le laisser à Windows.</p><small>autorisation Windows · redémarrage</small><br><button class="health-button" data-tweak="fichier-echange-auto">Laisser Windows le gérer</button></div>` : "";
+    tuningBody.innerHTML =
+      `<p class="lead">Réglages reconnus et sans danger. Chaque changement est noté dans le Journal et peut être annulé. Avant ceux qui demandent l'autorisation Windows, crée un point de restauration (Entretien).</p>` +
+      power +
+      pagefile +
+      [...groups.entries()]
+        .map(([cat, items]) => `<h6 class="health-cat">${esc(cat)}</h6>` + items.map((t) => `<div class="check ${t.actif ? "ok" : "absent"} component"><h5><i></i>${esc(t.titre)} ${badge(t)}</h5><p>${esc(t.description)}</p>${notes(t) ? `<small>${esc(notes(t))}</small><br>` : ""}${!t.actif || t.ponctuel ? `<button class="health-button" data-tweak="${t.id}" data-admin="${t.admin}">${t.ponctuel ? "Lancer" : "Appliquer"}</button>` : ""}${t.annulable ? `<button class="health-button" data-undo="${t.id}">Annuler</button>` : ""}</div>`).join(""))
+        .join("") +
+      `<h6 class="health-cat">Programmes au démarrage de Windows</h6><div class="check absent component">${st.demarrage.length ? st.demarrage.map((e) => `<div class="row"><span>${esc(e.nom)}${e.ruche === "HKLM" ? " <small>(tous les comptes)</small>" : ""}</span><span class="v">${e.actif ? "se lance" : "désactivé"} <button class="health-button small" data-startup="${esc(e.nom)}" data-on="${!e.actif}">${e.actif ? "Désactiver" : "Réactiver"}</button></span></div>`).join("") : '<div class="empty">Aucun.</div>'}</div>`;
+    tuningBody.querySelectorAll<HTMLButtonElement>("[data-health]").forEach((b) => (b.onclick = () => void runAndReport(b, () => api.invoke("sante:action", b.dataset.health))));
+    tuningBody.querySelectorAll<HTMLButtonElement>("[data-tweak]").forEach((b) => (b.onclick = () => void runAndReport(b, () => api.invoke("sante:optimiser", { id: b.dataset.tweak }), loadTuning)));
+    tuningBody.querySelectorAll<HTMLButtonElement>("[data-undo]").forEach((b) => (b.onclick = () => void runAndReport(b, () => api.invoke("sante:optimiser", { id: b.dataset.undo, annuler: true }), loadTuning)));
+    tuningBody.querySelectorAll<HTMLButtonElement>("[data-startup]").forEach((b) => (b.onclick = () => void runAndReport(b, () => api.invoke("sante:demarrage", { nom: b.dataset.startup, actif: b.dataset.on === "true" }), loadTuning)));
+  };
+
   const load = async (refresh = false) => {
     list.body.innerHTML = '<div class="empty">Bilan en cours (lecture des journaux de Windows, une vingtaine de secondes)…</div>';
     render(await api.invoke<Health>("sante:bilan", refresh));
@@ -114,5 +200,6 @@ export function renderHealth(root: HTMLElement): void {
     const file = await api.invoke<string | null>("sante:rapport");
     say(file ? `Rapport enregistré : ${file}` : "Fais d'abord un bilan.", Boolean(file));
   };
+  showTab("bilan");
   void load();
 }

@@ -466,3 +466,17 @@ body.mode-jeu *, body.mode-jeu *::before, body.mode-jeu *::after { animation-pla
 .health-button { border: 1px solid var(--hud); background: rgba(var(--hud-rgb), 0.1); color: var(--text); border-radius: 8px; padding: 7px 12px; cursor: pointer; font: 500 12px "Inter"; margin-top: 6px; }
 .health-button:hover { background: rgba(var(--hud-rgb), 0.22); }
 .health-button:disabled { opacity: 0.5; cursor: wait; }
+.health-tabs { display: flex; gap: 6px; padding: 10px 14px 0; }
+.health-tabs .chip.on { border-color: var(--hud); color: var(--hud-strong); }
+.health-pane { padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+.health-pane .component .row { padding: 4px 0; }
+.health-pane .component p { margin: 6px 0; }
+.health-pane .tag { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; margin-left: 6px; color: var(--muted); }
+.health-pane .tag.ok { color: #6eff96; border-color: rgba(110, 255, 150, 0.4); }
+.health-pane small { color: var(--muted); font-size: 11px; }
+.health-cat { margin: 8px 0 0; font: 600 11px "Grotesk"; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.health-refresh { display: flex; justify-content: flex-end; }
+.health-button.small { padding: 3px 8px; margin: 0 0 0 8px; font-size: 11px; }
+.health-pane .health-button + .health-button { margin-left: 6px; }
+.hidden { display: none !important; }
+.health-pane .health-actions .health-button { margin: 0; }

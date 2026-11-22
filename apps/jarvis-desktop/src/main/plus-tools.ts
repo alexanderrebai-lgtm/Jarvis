@@ -76,6 +76,16 @@ export interface PlusHost {
   listBackups: () => unknown;
   restoreFromBackup: (archive: string, entry: string, destination: string) => Promise<string>;
   diagnostic: () => Promise<CheckResult[]>;
+  /** Santé du PC, composants et optimisations (chaque changement est noté et annulable). */
+  pc: {
+    sante: () => Promise<unknown>;
+    composants: () => Promise<unknown>;
+    optimisations: () => Promise<unknown>;
+    optimiser: (id: string, annuler: boolean) => Promise<{ ok: boolean; message: string }>;
+    actionSante: (id: string) => Promise<{ ok: boolean; message: string }>;
+    demarrage: (nom: string, actif: boolean) => Promise<{ ok: boolean; message: string }>;
+    fermer: (nom: string) => Promise<{ ok: boolean; message: string }>;
+  };
   showImage: (titre: string, file: string, page?: PageId) => Promise<void>;
 }
 
@@ -341,6 +351,23 @@ export function plusTools(h: PlusHost) {
     sdkTool("fichier_restaurer", "Remet une version d'un fichier (l'état actuel est gardé en copie).", { version: z.string(), chemin: z.string() }, safe(async ({ version, chemin }) => (h.versions.restore(version, path.resolve(h.workspace, chemin)), text("Restauré.")))),
     sdkTool("sauvegardes", "Sauvegardes (archives quotidiennes de la mémoire, des projets et des documents) ; maintenant=true pour en faire une tout de suite.", { maintenant: z.boolean().optional() }, safe(async ({ maintenant }) => text(maintenant ? await h.backups.run() : { derniere: h.backups.last, archives: h.listBackups() }))),
     sdkTool("sauvegarde_restaurer", "Extrait un fichier d'une archive de sauvegarde (chemin dans l'archive, par ex. projets/volant/JOURNAL.md) vers un dossier.", { archive: z.string(), fichier: z.string(), destination: z.string() }, safe(async ({ archive, fichier, destination }) => text(await h.restoreFromBackup(archive, fichier, path.resolve(h.workspace, destination))))),
+    sdkTool("pc_sante", "Bilan de santé du PC sur 30 jours : arrêts brutaux (coupure ou écran bleu), erreurs matérielles, plantages du pilote graphique, carte graphique, réglages, avec les causes probables.", {}, safe(async () => text(await h.pc.sante())), RO),
+    sdkTool("pc_composants", "Diagnostic détaillé de chaque composant du PC : processeur, carte graphique (température, mémoire vidéo, puissance, fréquences, liaison PCIe), mémoire (utilisée, engagée, fichier d'échange, barrettes), disques (santé, température, usure, place libre), réseau, système, et les programmes les plus gourmands.", {}, safe(async () => text(await h.pc.composants())), RO),
+    sdkTool("pc_optimisations", "Optimisations disponibles (catalogue sûr et réversible) avec leur état actuel, et programmes lancés au démarrage de Windows.", {}, safe(async () => text(await h.pc.optimisations())), RO),
+    sdkTool(
+      "pc_optimiser",
+      "Applique ou annule une optimisation du catalogue (ids de pc_optimisations, plus « fichier-echange-auto » et « plan-equilibre »). Seulement quand Alex le demande ou l'accepte ; dis-lui ce qui change et que c'est annulable. Windows peut demander une autorisation.",
+      { id: z.string(), annuler: z.boolean().optional() },
+      safe(async ({ id, annuler }) => text((await h.pc.optimiser(id, annuler === true)).message)),
+    ),
+    sdkTool(
+      "pc_action_sante",
+      "Actions de la page Santé du PC : plan-performances, plan-equilibre, limite-gpu (test à 80 % jusqu'au redémarrage), limite-gpu-defaut, nettoyer-temp, ouvrir-mode-jeu, ouvrir-graphiques, ouvrir-demarrage, ouvrir-observateur, pilote-nvidia.",
+      { id: z.enum(["plan-performances", "plan-equilibre", "limite-gpu", "limite-gpu-defaut", "nettoyer-temp", "ouvrir-mode-jeu", "ouvrir-graphiques", "ouvrir-demarrage", "ouvrir-observateur", "pilote-nvidia"]) },
+      safe(async ({ id }) => text((await h.pc.actionSante(id)).message)),
+    ),
+    sdkTool("pc_demarrage", "Active ou désactive un programme au démarrage de Windows (comme le Gestionnaire des tâches : rien n'est désinstallé).", { nom: z.string(), actif: z.boolean() }, safe(async ({ nom, actif }) => text((await h.pc.demarrage(nom, actif)).message))),
+    sdkTool("pc_fermer_programme", "Ferme un programme ouvert (parmi les plus gourmands en mémoire). Refuse les processus de Windows et de Jarvis. Préviens Alex qu'un travail non enregistré serait perdu.", { nom: z.string() }, safe(async ({ nom }) => text((await h.pc.fermer(nom)).message))),
     sdkTool("diagnostic", "Bilan de santé de Jarvis : cerveau, oreilles, voix, empreinte vocale, caméras, maison, Spotify, planning, réveil, sauvegardes, coffre-fort, IA locale, labo… avec ce qu'il faut corriger.", {}, safe(async () => text(await h.diagnostic())), RO),
     sdkTool("afficher_fichier_image", "Affiche une image du disque (figure du labo, photo, schéma) sur une page.", { chemin: z.string(), titre: z.string(), page: z.enum(PAGE_IDS).optional() }, safe(async ({ chemin, titre, page }) => (await h.showImage(titre, path.resolve(h.workspace, chemin), page), text("Affiché.")))),
   ];

@@ -17,10 +17,10 @@ import type { JarvisServices } from "./main.js";
  * Ce que les outils supplémentaires de Claude peuvent faire sur le PC (dispositions, recherche, bibliothèque, labo, garage, budget, papiers, sauvegardes, routines, minuteurs, port série…). Branché sur plusHostRef.
  */
 
-export type PlusHostDeps = Pick<JarvisServices, "actions" | "applyDisposition" | "backups" | "budget" | "dispositions" | "findObd" | "garage" | "lab" | "launchResearch" | "launchRoutine" | "learning" | "library" | "literature" | "localAI" | "mask" | "micro" | "obd" | "ownerName" | "pages" | "papers" | "plusHostRef" | "privacy" | "procedures" | "routines" | "runDiagnostic" | "showPanel" | "spotify" | "spotifyHelpers" | "tasks" | "timers" | "updateTray" | "veille" | "versions" | "wake" | "workFolder" | "workspace">;
+export type PlusHostDeps = Pick<JarvisServices, "actions" | "applyDisposition" | "backups" | "budget" | "dispositions" | "findObd" | "garage" | "lab" | "launchResearch" | "launchRoutine" | "learning" | "library" | "literature" | "localAI" | "mask" | "micro" | "obd" | "ownerName" | "pages" | "papers" | "plusHostRef" | "privacy" | "procedures" | "routines" | "runDiagnostic" | "showPanel" | "spotify" | "spotifyHelpers" | "tasks" | "timers" | "updateTray" | "veille" | "versions" | "wake" | "workFolder" | "workspace" | "pcCare">;
 
 export function connectPlusHost(d: PlusHostDeps) {
-  const { actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace } = d;
+  const { actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare } = d;
   plusHostRef.current = {
     workspace,
     dispositions,
@@ -85,6 +85,18 @@ export function connectPlusHost(d: PlusHostDeps) {
       return `Restauré dans ${target}.`;
     },
     diagnostic: () => runDiagnostic(),
+    pc: {
+      sante: async () => {
+        const h = await pcCare.healthCheck();
+        return { constats: h.constats, arretsBrutaux: h.raw.arretsBrutaux, carteGraphique: h.raw.nvidia ?? null };
+      },
+      composants: () => pcCare.componentsReport(),
+      optimisations: () => pcCare.tuningState(),
+      optimiser: (id, annuler) => pcCare.applyTweak(id, annuler),
+      actionSante: (id) => pcCare.healthAction(id),
+      demarrage: (nom, actif) => pcCare.setStartupProgram(nom, actif),
+      fermer: (nom) => pcCare.closeProgramByName(nom),
+    },
     showImage: async (titre, file, page) => {
       const ext = path.extname(file).toLowerCase().replace(".", "") || "png";
       showPanel({ titre, imageDataUrl: `data:image/${ext === "jpg" ? "jpeg" : ext};base64,${(await readFile(file)).toString("base64")}`, ...(page ? { page } : {}) });

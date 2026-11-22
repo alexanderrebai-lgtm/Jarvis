@@ -1694,6 +1694,7 @@ app.on("window-all-closed", () => undefined);
 
 
 
+
 /** Services partagés avec les modules de Jarvis (chaque module reçoit seulement ceux dont il a besoin). */
 export interface JarvisServices {
   actions: typeof actions;
@@ -1734,6 +1735,7 @@ export interface JarvisServices {
   ownerName: typeof ownerName;
   pages: typeof pages;
   papers: typeof papers;
+  pcCare: typeof pcCare;
   perf: typeof perf;
   phone: typeof phone;
   planning: typeof planning;
@@ -1786,4 +1788,4 @@ const intentActions = createIntentActions({ askBrain, backups, env, learning, no
 
 const routineRunner = createRoutineRunner({ actions, agenda, applyDisposition, pages, phone, playWakePlaylist, reply, routines, security, setFlag, setSurveillance, spotify, spotifyHelpers, takeAbsentSince, tapo, wake });
 
-connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace });
+connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare });

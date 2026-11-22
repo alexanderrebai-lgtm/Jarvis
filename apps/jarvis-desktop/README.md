@@ -282,6 +282,14 @@ Page « Santé du PC » (ou « Jarvis, ouvre le diagnostic du PC ») :
 - actions sur clic seulement, réversibles : plan « Performances élevées », test de limite de la carte graphique à 80 % (jusqu'au redémarrage, Windows demande l'autorisation), nettoyage des fichiers temporaires, raccourcis vers les réglages de Windows ;
 - « Rapport » enregistre le bilan dans Documents\Jarvis\rapports.
 
+### Composants et optimisations
+
+Dans la page Santé du PC, deux onglets de plus :
+- **Composants** : processeur, carte graphique (température, mémoire vidéo, puissance, fréquences, liaison PCIe), mémoire (utilisée, engagée, fichier d'échange, barrettes et XMP), disques (santé, température, usure, place), réseau, système, et les programmes les plus gourmands (bouton « Fermer », jamais pour Windows ou Jarvis).
+- **Optimisations** : catalogue de réglages reconnus et sans danger (mode jeu de Windows, enregistrement en arrière-plan de la Game Bar, planification GPU, démarrage rapide, transparence, point de restauration, TRIM, nettoyage de disque, fichier d'échange géré par Windows, plan d'alimentation, limite de la carte graphique) et programmes au démarrage (activer, désactiver). Chaque changement est noté dans le Journal ; les réglages du registre gardent leur ancienne valeur et s'annulent d'un clic ; ceux qui touchent au système passent par l'autorisation de Windows.
+
+Claude peut faire la même chose à la voix (« Jarvis, optimise mon PC pour les jeux », « désactive Discord au démarrage ») avec les outils pc_sante, pc_composants, pc_optimisations, pc_optimiser, pc_action_sante, pc_demarrage et pc_fermer_programme. Une voix inconnue ne peut rien changer.
+
 ## Adapté au PC
 
 Au démarrage, Jarvis lit le matériel (page Diagnostic → Profil matériel) et se règle :

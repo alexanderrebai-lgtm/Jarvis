@@ -5,18 +5,20 @@ import { app, ipcMain, shell } from "electron";
 import { describeProfile } from "./hardware.js";
 import { analyzeHealth, collectHealth, GameRecorder, HEALTH_ACTIONS, healthReport, healthSummaryForWeb, runHealthAction, type Finding, type HealthActionId, type HealthRaw } from "./pc-health.js";
 import path from "node:path";
+import { analyzeComponents, canClose, closeProgram, collectComponents } from "./pc-components.js";
+import { PcTuning, TWEAKS } from "./pc-tuning.js";
 import type { JarvisServices } from "./main.js";
 
 /**
  * Soin du PC : bilan de santé (page Santé du PC, recherche de solutions en ligne, rapport, bilan après un arrêt brutal), puce graphique de l'interface (Ryzen « G ») et mode jeu (la carte graphique et le processeur reviennent au jeu).
  */
 
-export type CreatePcCareDeps = Pick<JarvisServices, "actions" | "brain" | "broadcast" | "config" | "ears" | "env" | "flags" | "games" | "host" | "localAI" | "localVoice" | "ownerName" | "pages" | "perf" | "race" | "updateTray" | "workspace"> & {
+export type PcCareDeps = Pick<JarvisServices, "actions" | "brain" | "broadcast" | "config" | "ears" | "env" | "flags" | "games" | "host" | "localAI" | "localVoice" | "ownerName" | "pages" | "perf" | "race" | "updateTray" | "workspace"> & {
   hardware: () => JarvisServices["hardware"];
   tuning: () => JarvisServices["tuning"];
 };
 
-export function createPcCare(d: CreatePcCareDeps) {
+export function createPcCare(d: PcCareDeps) {
   const { actions, brain, broadcast, config, ears, env, flags, games, host, localAI, localVoice, ownerName, pages, perf, race, updateTray, workspace, hardware, tuning } = d;
   // ---------- Santé du PC ----------
 
@@ -78,13 +80,14 @@ export function createPcCare(d: CreatePcCareDeps) {
     const health = refresh || !lastHealth ? await healthCheck() : lastHealth;
     return { ...health, machine: machineName(), alimentation: env("PC_ALIMENTATION") ?? null, enJeu: flags.jeu };
   });
-  ipcMain.handle("sante:action", async (_event, id: string) => {
+  async function healthAction(id: string): Promise<{ ok: boolean; message: string }> {
     if (!(id in HEALTH_ACTIONS)) return { ok: false, message: "Action inconnue." };
     const nvidia = lastHealth?.raw.nvidia ?? (await collectHealth(gameRecorder)).nvidia;
     const message = await runHealthAction(id as HealthActionId, nvidia, (url) => void shell.openExternal(url));
     actions.add({ outil: "santé du PC", resume: `${HEALTH_ACTIONS[id as HealthActionId]} : ${message}`.slice(0, 400), autorise: true });
     return { ok: true, message };
-  });
+  }
+  ipcMain.handle("sante:action", (_event, id: string) => healthAction(id));
   ipcMain.handle("sante:web", async () => {
     try {
       return { ok: true, ...(await healthWebAdvice()) };
@@ -97,6 +100,44 @@ export function createPcCare(d: CreatePcCareDeps) {
     if (file) void shell.openPath(file);
     return file ?? null;
   });
+
+  // ---------- Composants et optimisations ----------
+
+  const pcTuning = new PcTuning(config.dataDir);
+  const logChange = (resume: string) => actions.add({ outil: "optimisation du PC", resume: resume.slice(0, 400), autorise: true });
+
+  async function componentsReport() {
+    const raw = await collectComponents();
+    return { rapports: analyzeComponents(raw), processus: raw.processus.map((p) => ({ ...p, fermable: canClose(p.nom) })) };
+  }
+
+  async function applyTweak(id: string, undo = false): Promise<{ ok: boolean; message: string }> {
+    const r = id === "fichier-echange-auto" ? await pcTuning.automaticPagefile() : id === "plan-equilibre" ? await pcTuning.balancedPlan() : await pcTuning.apply(id, undo);
+    logChange(`${undo ? "Annulé" : "Appliqué"} : ${TWEAKS.find((t) => t.id === id)?.titre ?? id} → ${r.message}`);
+    return r;
+  }
+
+  async function setStartupProgram(nom: string, actif: boolean): Promise<{ ok: boolean; message: string }> {
+    const entry = (await pcTuning.state()).demarrage.find((e) => e.nom.toLowerCase() === nom.toLowerCase());
+    if (!entry) return { ok: false, message: `${nom} n'est pas dans les programmes au démarrage.` };
+    const r = await pcTuning.setStartup(entry, actif);
+    logChange(`Démarrage : ${r.message}`);
+    return r;
+  }
+
+  async function closeProgramByName(nom: string, id?: number): Promise<{ ok: boolean; message: string }> {
+    const target = id !== undefined ? { id, nom } : (await collectComponents()).processus.find((p) => p.nom.toLowerCase() === nom.toLowerCase());
+    if (!target) return { ok: false, message: `${nom} n'est pas parmi les programmes ouverts les plus gourmands.` };
+    const r = await closeProgram(target.id, target.nom);
+    logChange(r.message);
+    return r;
+  }
+
+  ipcMain.handle("sante:composants", () => componentsReport());
+  ipcMain.handle("sante:optimisations", () => pcTuning.state());
+  ipcMain.handle("sante:optimiser", (_event, payload: { id: string; annuler?: boolean }) => applyTweak(payload.id, payload.annuler === true));
+  ipcMain.handle("sante:demarrage", (_event, payload: { nom: string; actif: boolean }) => setStartupProgram(payload.nom, payload.actif));
+  ipcMain.handle("sante:fermer", (_event, payload: { id: number; nom: string }) => closeProgramByName(payload.nom, payload.id));
 
   // ---------- Puce graphique de l'interface ----------
 
@@ -173,5 +214,5 @@ export function createPcCare(d: CreatePcCareDeps) {
     }
   }
 
-  return { checkLastShutdown, applyGpuPreference, updateGameMode, setGameManual, gameManualChoice, gpuNote };
+  return { checkLastShutdown, applyGpuPreference, updateGameMode, setGameManual, gameManualChoice, gpuNote, componentsReport, tuningState: () => pcTuning.state(), applyTweak, setStartupProgram, closeProgramByName, healthCheck, healthAction };
 }
