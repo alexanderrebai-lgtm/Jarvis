@@ -65,6 +65,35 @@ verrouillée ? », « préchauffe la voiture pour 8 h », « quelle autonomie re
 | Services connectés de la voiture | selon la marque (souvent inclus un temps, puis abonnement) |
 | Intégration dans Home Assistant | gratuit |
 
+### Cas d'une voiture sans services connectés (ex. Peugeot 107)
+
+Une Peugeot 107 (comme beaucoup de voitures d'avant ~2015) n'a **aucun service
+connecté d'usine** : il n'y a donc rien à relier dans Home Assistant pour le
+verrouillage ou la climatisation à distance — ces commandes n'existent tout
+simplement pas sur la voiture. Il faut un **boîtier tiers**. Ce qui est
+réaliste, du plus utile au plus lourd :
+
+1. **Diagnostic (déjà géré)** : adaptateur OBD2 ELM327 (~15–25 €). La 107 a une
+   prise OBD depuis 2005. Codes défaut, mesures en direct.
+2. **Traceur GPS OBD 4G (le vrai plus pour une 107, ~30–60 € + carte SIM
+   ~3–5 €/mois)** : se branche sur la prise OBD. Donne la **position**, l'**historique
+   des trajets**, une **alerte si la voiture bouge** et la **tension de la
+   batterie**. Beaucoup de ces traceurs offrent une API ou un webhook : Jarvis
+   peut alors répondre « où est la voiture ? », « elle a roulé aujourd'hui ? »,
+   « la batterie est-elle faible ? ». C'est l'équivalent réaliste du « suivi » de
+   la voiture pour ce modèle.
+3. **Verrouillage / démarrage à distance** : il faut un **module d'alarme GSM ou
+   de démarrage à distance posé par un installateur** (~150–400 €), câblé sur la
+   centralisation. Sur une 107 essence **à boîte manuelle**, le démarrage à
+   distance est compliqué et rarement intéressant ; le verrouillage à distance
+   reste possible mais c'est une pose spécialisée.
+
+En clair, pour ta 107 : le diagnostic OBD est déjà là, et le boîtier qui vaut le
+coup est un **traceur GPS OBD avec API** — je peux brancher Jarvis dessus (il
+reçoit la position et les trajets comme il reçoit les données de la montre, sans
+cloud chez nous) dès que tu en choisis un. Le verrouillage à distance, lui,
+demande une pose chez un installateur.
+
 ### Ce qui reste impossible
 
 Démarrer ou déverrouiller une voiture qui n'offre pas ces commandes officielles.
