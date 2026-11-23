@@ -99,6 +99,8 @@ export interface PlusHost {
   verifier: () => Promise<string>;
   ranger: () => Promise<string>;
   voiture: () => Promise<string>;
+  /** Compagnon de jeu : le jeu détecté et les notes de progression. */
+  jeu: { phrase: () => string; note: (texte: string) => string };
   showImage: (titre: string, file: string, page?: PageId) => Promise<void>;
 }
 
@@ -376,6 +378,8 @@ export function plusTools(h: PlusHost) {
     sdkTool("test_chez_moi", "Fait le test de bout en bout : vérifie pour de vrai chaque fonction de Jarvis (Claude, voix, Google, Spotify, maison, caméras, Telegram, montre, voiture, téléphone…) et rend le verdict (marche / à surveiller / en échec / non configuré) avec le conseil. À utiliser pour « est-ce que tout marche ? », « fais le point sur mon installation ». Envoie un court message de test Telegram si configuré.", {}, safe(async () => text(await h.verifier()))),
     sdkTool("capacites_etat", "Ce que Jarvis sait faire, ce qui est actif chez Alex et ce qu\u2019il manque pour le reste (à utiliser pour « qu\u2019est-ce que tu sais faire ? », « qu\u2019est-ce que je peux configurer ? »).", {}, safe(async () => text(h.capacites())), RO),
     sdkTool("cout_claude", "Consommation de Claude par Jarvis : appels et coût du jour et du mois, ce qui consomme le plus (surveillance d\u2019écran, briefings, mails…), plafond du jour.", {}, safe(async () => text(h.cout())), RO),
+    sdkTool("jeu_en_cours", "Le jeu vidéo que Alex joue en ce moment (détecté tout seul : Call of Duty, EA FC, GTA, Flight Simulator, aventure, course…), son genre, le temps de jeu, et ses notes de progression. À utiliser pour « à quoi je joue ? », « où j\u2019en étais ? » ou avant de conseiller sur un jeu.", {}, safe(async () => text(h.jeu.phrase())), RO),
+    sdkTool("jeu_note", "Retient où Alex en est dans le jeu en cours (quête, objectif, réglage qui marche, code d\u2019un coffre…), pour le lui rappeler à la prochaine partie. Une note courte.", { texte: z.string().min(2).max(500) }, safe(async ({ texte }) => text(h.jeu.note(texte)))),
     sdkTool("voiture_suivi", "Où est la voiture d\u2019Alex et son état, via son traceur GPS OBD (serveur Traccar) : position/adresse, si elle roule ou est à l\u2019arrêt, tension de la batterie, kilométrage. Pour une voiture ancienne sans services connectés (ex. Peugeot 107).", {}, safe(async () => text(await h.voiture())), RO),
     sdkTool("briefing_lister", "Liste les briefings programmés.", {}, safe(async () => text(h.briefings.lister())), RO),
     sdkTool("briefing_supprimer", "Supprime un briefing programmé (par son identifiant, visible dans briefing_lister).", { id: z.string() }, safe(async ({ id }) => text(h.briefings.supprimer(id) ? "Briefing supprimé." : "Briefing introuvable."))),

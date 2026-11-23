@@ -312,6 +312,7 @@ export const PAGE_ICONS: Array<{ id: string; label: string; icon: string }> = [
   { id: "sante", label: "Santé du PC", icon: SVG('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/><path d="M6 10h3l1.5-3 2 6 1.5-3H18"/>') },
   { id: "forme", label: "Forme", icon: SVG('<path d="M20.8 5.6a5 5 0 0 0-7-.2L12 7l-1.8-1.6a5 5 0 1 0-6.8 7.2L12 21l8.6-8.4a5 5 0 0 0 .2-7Z"/>') },
   { id: "cout", label: "Coût", icon: SVG('<circle cx="12" cy="12" r="9"/><path d="M14.5 9.2c-.6-.8-1.5-1.2-2.5-1.2-1.4 0-2.5.8-2.5 2s1 1.7 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2c-1 0-1.9-.4-2.5-1.2M12 6.5V8m0 8v1.5"/>') },
+  { id: "jeu", label: "Jeu", icon: SVG('<rect x="2.5" y="7" width="19" height="10" rx="5"/><path d="M7 10v4M5 12h4M15.5 11h.01M18 13h.01"/>') },
   { id: "memoire", label: "Mémoire", icon: SVG('<path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V5a2 2 0 0 0-3-1Z"/><path d="M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1"/>') },
   { id: "journal", label: "Journal", icon: SVG('<path d="M5 3h11l3 3v15H5z"/><path d="M8 9h8M8 13h8M8 17h5"/>') },
   { id: "diagnostic", label: "Diagnostic", icon: SVG('<path d="M4 12h3l2-5 4 10 2-5h5"/><circle cx="12" cy="12" r="10"/>') },

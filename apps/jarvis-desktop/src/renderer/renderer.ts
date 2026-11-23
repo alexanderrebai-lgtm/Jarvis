@@ -8,6 +8,7 @@ import { renderHealth } from "./pages/sante.js";
 import { renderMemory } from "./pages/memoire.js";
 import { renderForme } from "./pages/forme.js";
 import { renderCout } from "./pages/cout.js";
+import { renderJeu } from "./pages/jeu.js";
 import { renderEngineer } from "./pages/ingenieur.js";
 import { renderPerformance } from "./pages/performances.js";
 import { renderProject } from "./pages/projet.js";
@@ -62,6 +63,9 @@ switch (page) {
     break;
   case "cout":
     renderCout(root);
+    break;
+  case "jeu":
+    renderJeu(root);
     break;
   default:
     renderHome(root);

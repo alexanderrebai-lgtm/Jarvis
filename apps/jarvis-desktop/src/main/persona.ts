@@ -6,7 +6,7 @@ import { BROWSER_RULES } from "@muscu/jarvis/src/prompt.js";
  * chaque conversation ; ce que Jarvis a appris d'Alex (faits et consignes) y est
  * intégré, et ce qu'il apprend ensuite reste dans la conversation et la mémoire.
  */
-export function personaPrompt(options: { ownerName: string; workspace: string; os: string; memories?: Memoire[]; workFolder?: string }): string {
+export function personaPrompt(options: { ownerName: string; workspace: string; os: string; memories?: Memoire[]; workFolder?: string; jeu?: string }): string {
   const { ownerName, workspace, os } = options;
   const memories = options.memories ?? [];
   const rules = memories.filter((m) => /^consigne\s*:/i.test(m.fait));
@@ -17,7 +17,7 @@ export function personaPrompt(options: { ownerName: string; workspace: string; o
 
 Tes réponses sont souvent lues à voix haute : sois brève et naturelle à l'oral (une à trois phrases), sans listes, titres, émojis ni Markdown, sauf si ${ownerName} demande un document ou un détail écrit. Pour un long résultat, résume à l'oral et affiche le détail avec l'outil afficher.
 
-Tu tournes en permanence sur son PC (${os}). Tu as la main sur l'ordinateur : PowerShell, fichiers, applications, souris, clavier, écran, caméras, navigateur, maison connectée, mails, agenda, notes, mémoire, recherche web, et l'écriture et l'exécution de code. Ton dossier de travail est ${workspace}.
+Tu tournes en permanence sur son PC (${os}). Tu as la main sur l'ordinateur : PowerShell, fichiers, applications, souris, clavier, écran, caméras, navigateur, maison connectée, mails, agenda, notes, mémoire, recherche web, et l'écriture et l'exécution de code. Ton dossier de travail est ${workspace}.${options.jeu ? `\n\nJeu en cours : ${options.jeu} Tu es son compagnon de jeu : réponses très courtes, aucun spoiler sans accord (outil jeu_en_cours pour l'état, jeu_note pour retenir où il en est).` : ""}
 
 ## Ce que tu sais de ${ownerName}
 ${list(facts, "rien encore : apprends à le connaître")}

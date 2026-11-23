@@ -27,7 +27,7 @@ import { Budget } from "./budget.js";
 import { jarvisMcpServer, ScreenMap, type DesktopHost, type ScreenShot } from "./desktop-tools.js";
 import { runChecks, sayDiagnostic } from "./diagnostic.js";
 import { Microcontrollers } from "./electronics.js";
-import { DEFAULT_GAME_PROCESSES, GameWatcher } from "./games.js";
+import { CompagnonStore, JeuxDetecteur, estGenre, listeDepuisFichier, parsePerso, phraseJeu, profil as profilJeu, PROFILS, promptCoach, dureeLisible, type Genre, type JeuDetecte } from "./compagnon.js";
 import { Garage } from "./garage.js";
 import { Journal } from "./journal.js";
 import { Lab } from "./lab.js";
@@ -575,12 +575,23 @@ const race = new RaceManager({
     if (!flags.doNotDisturb) say(`Séance terminée. ${summary} Dis-moi si tu veux que je l'analyse.`);
   },
 });
-const games = new GameWatcher({
-  processes: [...DEFAULT_GAME_PROCESSES, ...(env("JEUX_PROCESSUS") ?? "").split(",").map((s) => s.trim()).filter(Boolean)],
-  onChange: (running) => {
+const compagnon = new CompagnonStore(config.dataDir);
+compagnon.clorePerimees();
+/** Jeu indiqué à la main quand la détection ne le connaît pas. */
+let jeuManuel: JeuDetecte | undefined;
+let dernierJeuOuvert: string | undefined;
+const games = new JeuxDetecteur({
+  supplementaires: (env("JEUX_PROCESSUS") ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+  perso: parsePerso(env("JEUX_PERSO")),
+  // Test en direct : un fichier remplace la vraie liste des programmes.
+  ...(env("JEUX_LISTE_TEST") ? { list: listeDepuisFichier(env("JEUX_LISTE_TEST")!), intervalMs: 1_000 } : {}),
+  onChange: (running, principal) => {
     pages.setGameRunning(running.length > 0 || race.active);
     pcCare.setGameManual(undefined);
     updateGameMode();
+    suivreSessions(running);
+    ouvrirPageDuJeu(principal);
+    broadcast("compagnon:etat", null);
   },
 });
 
@@ -1090,7 +1101,7 @@ function noteUsage(u: Parameters<UsageStore["record"]>[0]): void {
 const brain = new Brain({
   dataDir: config.dataDir,
   workspace,
-  systemPrompt: () => personaPrompt({ ownerName, workspace, os: "Windows", memories: notes.memories(), workFolder }),
+  systemPrompt: () => personaPrompt({ ownerName, workspace, os: "Windows", memories: notes.memories(), workFolder, jeu: (() => { const j = jeuCourant(); return j ? `${j.nom} (${profilJeu(j.genre).libelle}).` : undefined; })() }),
   // Outils de Jarvis + connecteurs MCP ajoutés dans les Réglages (relus à chaque conversation).
   mcpServers: () => ({ ...connectors.active(), ...builtinMcp }),
   model: env("CLAUDE_MODEL"),
@@ -1986,6 +1997,110 @@ ipcMain.handle("diagnostic:run", async () => {
 
 ipcMain.handle("jeu:etat", () => flags.jeu);
 
+// ---------- Compagnon de jeu ----------
+
+function jeuCourant(): JeuDetecte | undefined {
+  return games.current ?? jeuManuel;
+}
+
+/** Début et fin des sessions de jeu, pour l'historique et le temps de jeu. */
+function suivreSessions(running: JeuDetecte[]): void {
+  const noms = new Set(running.map((j) => j.nom));
+  for (const j of running) compagnon.debut(j.nom, j.genre);
+  for (const s of compagnon.sessions(50)) {
+    if (s.fin || noms.has(s.jeu) || s.jeu === jeuManuel?.nom) continue;
+    const fini = compagnon.fin(s.jeu);
+    if (fini && (fini.minutes ?? 0) >= 1) journal.add({ demande: `Session de jeu : ${fini.jeu}`, reponse: `${dureeLisible(fini.minutes ?? 0)} de jeu.`, outils: ["compagnon"] });
+  }
+}
+
+/** Ouvre la page adaptée au jeu qui vient de se lancer, sans jamais passer devant lui. */
+function ouvrirPageDuJeu(principal: JeuDetecte | undefined): void {
+  if (!principal) {
+    dernierJeuOuvert = undefined;
+    return;
+  }
+  if (principal.nom === dernierJeuOuvert) return;
+  dernierJeuOuvert = principal.nom;
+  const mode = env("JEU_PAGE_AUTO") ?? "auto";
+  if (mode === "jamais") return;
+  // Avec un seul écran, une fenêtre s'ouvrirait par-dessus le jeu : on attend que tu la demandes.
+  if (mode !== "toujours" && pages.layout().ecrans < 2) return;
+  try {
+    pages.openPage(principal.genre === "course" ? "ingenieur" : "jeu", undefined, { show: true, focus: false });
+  } catch (error) {
+    console.warn("[compagnon]", error);
+  }
+}
+
+function etatCompagnon() {
+  const actuel = jeuCourant();
+  return {
+    actuel: actuel ? { ...actuel, minutes: compagnon.minutes(actuel.nom) } : null,
+    autres: games.jeux.filter((j) => j.nom !== actuel?.nom),
+    profil: actuel ? profilJeu(actuel.genre) : null,
+    notes: actuel ? compagnon.notes(actuel.nom) : [],
+    recents: compagnon.recents(8),
+    manuel: !games.current && !!jeuManuel,
+    genres: Object.values(PROFILS).map((p) => ({ genre: p.genre, libelle: p.libelle })),
+    ecranSecondaire: pages.layout().ecrans >= 2,
+  };
+}
+
+function phraseDuJeu(): string {
+  const actuel = jeuCourant();
+  const notes = actuel ? compagnon.notes(actuel.nom).slice(0, 3).map((n) => n.texte) : [];
+  return `${phraseJeu(actuel, actuel ? compagnon.minutes(actuel.nom) : 0, compagnon.recents(3))}${notes.length ? ` Ses notes : ${notes.join(" ; ")}.` : ""}`;
+}
+
+function noterJeu(texte: string): string {
+  const actuel = jeuCourant();
+  if (!actuel) throw new Error("Aucun jeu en cours : lance un jeu, ou indique-le dans la page Compagnon de jeu.");
+  compagnon.ajouteNote(actuel.nom, texte);
+  broadcast("compagnon:etat", null);
+  return `C'est noté pour ${actuel.nom}.`;
+}
+
+ipcMain.handle("compagnon:etat", () => etatCompagnon());
+ipcMain.handle("compagnon:demander", async (_event, input: { question?: string; sansSpoiler?: boolean; ecran?: boolean }) => {
+  const actuel = jeuCourant();
+  if (!actuel) throw new Error("Aucun jeu en cours.");
+  const question = String(input?.question ?? "").trim().slice(0, 800);
+  if (!question) throw new Error("Pose ta question.");
+  const r = await brain.ask(
+    mask(promptCoach({ jeu: actuel.nom, genre: actuel.genre, question, notes: compagnon.notes(actuel.nom), sansSpoiler: input?.sansSpoiler !== false, ecran: input?.ecran === true, proprietaire: ownerName })),
+    {},
+    { trust: "restreint", source: "compagnon de jeu", outils: ["WebSearch", "WebFetch", ...(input?.ecran === true ? ["ecran_capture"] : [])] },
+  );
+  return { texte: r.text.trim() };
+});
+ipcMain.handle("compagnon:note", (_event, input: { texte?: string }) => {
+  noterJeu(String(input?.texte ?? ""));
+  return true;
+});
+ipcMain.handle("compagnon:note-supprimer", (_event, id: string) => {
+  const ok = compagnon.supprimeNote(String(id));
+  broadcast("compagnon:etat", null);
+  return ok;
+});
+ipcMain.handle("compagnon:declarer", (_event, input: { nom?: string; genre?: string }) => {
+  const nom = String(input?.nom ?? "").trim().slice(0, 80);
+  if (jeuManuel) compagnon.fin(jeuManuel.nom);
+  if (!nom) {
+    jeuManuel = undefined;
+  } else {
+    const genre: Genre = input?.genre && estGenre(input.genre) ? input.genre : "autre";
+    jeuManuel = { nom, genre, source: "perso", processus: "" };
+    compagnon.debut(nom, genre);
+  }
+  broadcast("compagnon:etat", null);
+  return true;
+});
+ipcMain.handle("compagnon:ouvrir-course", () => {
+  pages.openPage("ingenieur", undefined, { show: true, focus: false });
+  return true;
+});
+
 // ---------- Connecteurs MCP (page Réglages) ----------
 
 const connectorResult = (fn: () => unknown) => {
@@ -2533,7 +2648,7 @@ const suivi = traccarUrl
       appareil: env("VOITURE_TRACCAR_APPAREIL"),
     })
   : undefined;
-connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings: briefingActions, sante: () => healthStore.phrase(), cout: () => phraseUsage(usage.summary(30), usagePlafond()), capacites: () => phraseCapacites(capaciteListe()), revue: async () => (await lancerRevue()).message, verifier: async () => phraseVerifications(await testerChezMoi()), ranger: async () => (await lancerRangement()).message, voiture: () => (suivi ? suivi.phrase() : Promise.resolve("Le suivi de la voiture n'est pas configuré : va dans Réglages → Voiture (traceur GPS) pour relier ton serveur Traccar.")) });
+connectPlusHost({ actions, applyDisposition, backups, budget, dispositions, findObd, garage, lab, launchResearch, launchRoutine, learning, library, literature, localAI, mask, micro, obd, ownerName, pages, papers, plusHostRef, privacy, procedures, routines, runDiagnostic, showPanel, spotify, spotifyHelpers, tasks, timers, updateTray, veille, versions, wake, workFolder, workspace, pcCare, briefings: briefingActions, sante: () => healthStore.phrase(), cout: () => phraseUsage(usage.summary(30), usagePlafond()), capacites: () => phraseCapacites(capaciteListe()), revue: async () => (await lancerRevue()).message, verifier: async () => phraseVerifications(await testerChezMoi()), ranger: async () => (await lancerRangement()).message, jeu: { phrase: phraseDuJeu, note: noterJeu }, voiture: () => (suivi ? suivi.phrase() : Promise.resolve("Le suivi de la voiture n'est pas configuré : va dans Réglages → Voiture (traceur GPS) pour relier ton serveur Traccar.")) });
 
 
 // ---------- Test de bout en bout (« Tester chez moi ») ----------
